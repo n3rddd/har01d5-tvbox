@@ -64,6 +64,42 @@ class Spider(BaseSpider):
             return self.host + raw
         return self.host + "/" + raw
 
+    def _extract_play_id(self, href):
+        raw = str(href or "").strip()
+        matched = re.search(r"/vodplay/(\d+-\d+-\d+)\.html", raw)
+        if matched:
+            return matched.group(1)
+        if re.fullmatch(r"\d+-\d+-\d+", raw):
+            return raw
+        return ""
+
+    def _extract_vod_id(self, href):
+        raw = str(href or "").strip()
+        matched = re.search(r"/voddetail/(\d+)\.html", raw)
+        if matched:
+            return matched.group(1)
+        if re.fullmatch(r"\d+", raw):
+            return raw
+        return ""
+
+    def _build_detail_request_url(self, id_or_url):
+        raw = str(id_or_url or "").strip()
+        if not raw:
+            return ""
+        vod_id = self._extract_vod_id(raw)
+        if vod_id:
+            return f"{self.host}/voddetail/{vod_id}.html"
+        return self._build_url(raw)
+
+    def _build_play_request_url(self, id_or_url):
+        raw = str(id_or_url or "").strip()
+        if not raw:
+            return ""
+        play_id = self._extract_play_id(raw)
+        if play_id:
+            return f"{self.host}/vodplay/{play_id}.html"
+        return self._build_url(raw)
+
     def _parse_list_cards(self, html):
         root = self.html(html)
         results = []
@@ -79,7 +115,7 @@ class Spider(BaseSpider):
             for anchor in card.xpath(".//a[@href]"):
                 raw_href = (anchor.xpath("./@href") or [""])[0].strip()
                 if "/voddetail/" in raw_href:
-                    href = self._build_url(raw_href)
+                    href = self._extract_vod_id(raw_href)
                     title = (
                         (anchor.xpath("./@title") or [""])[0].strip()
                         or "".join(anchor.xpath(".//text()")).strip()
@@ -173,14 +209,62 @@ class Spider(BaseSpider):
                     return clean.split("：", 1)[-1].strip()
         return ""
 
+    def _clean_text(self, text):
+        return re.sub(r"\s+", " ", str(text or "").replace("\xa0", " ")).strip()
+
+    def _extract_detail_text(self, detail_root, html, label, joiner=""):
+        value = self._extract_detail_field(detail_root, label, joiner=joiner)
+        if value:
+            return value
+        return self._extract_text_by_prefix(html, [f"{label}："])
+
+    def _extract_detail_field(self, detail_root, label, joiner=""):
+        if detail_root is None:
+            return ""
+        nodes = detail_root.xpath(f'.//span[contains(normalize-space(.), "{label}：")]')
+        if not nodes:
+            return ""
+        label_node = nodes[0]
+        values = []
+        if self._clean_text(label_node.tail):
+            values.append(self._clean_text(label_node.tail))
+        for sibling in label_node.itersiblings():
+            classes = " ".join(sibling.xpath("./@class"))
+            if sibling.tag == "span" and "text-muted" in classes:
+                break
+            if sibling.tag == "span" and "split-line" in classes:
+                continue
+            if sibling.tag == "a" and (sibling.xpath("./@href") or [""])[0].startswith("#"):
+                break
+            text = self._clean_text("".join(sibling.xpath(".//text()")))
+            if text:
+                values.append(text)
+            tail = self._clean_text(sibling.tail)
+            if tail:
+                values.append(tail)
+
+        cleaned = []
+        for value in values:
+            if value and value not in cleaned:
+                cleaned.append(value)
+        if joiner:
+            return joiner.join(cleaned)
+        return self._clean_text("".join(cleaned))
+
     def _parse_detail_page(self, html, vod_id):
         root = self.html(html)
-        title = ((root.xpath("//*[contains(@class,'title')][1]//text()") or [""])[0]).strip()
+        detail_root = (
+            root.xpath("//*[contains(concat(' ', normalize-space(@class), ' '), ' myui-content__detail ')][1]")
+            or [root]
+        )[0]
+        title = ((detail_root.xpath(".//*[contains(@class,'title')][1]//text()") or [""])[0]).strip()
         pic = (
             (root.xpath("//*[contains(@class,'myui-content__thumb')]//img/@data-original") or [""])[0].strip()
             or (root.xpath("//*[contains(@class,'myui-content__thumb')]//img/@src") or [""])[0].strip()
         )
-        content = "".join(root.xpath("//*[contains(@class,'data')][1]//text()")).strip()
+        content = self._extract_detail_field(detail_root, "简介") or "".join(
+            root.xpath("//*[contains(@class,'data')][1]//text()")
+        ).strip()
 
         episodes = []
         seen = set()
@@ -189,30 +273,42 @@ class Spider(BaseSpider):
             html,
             re.I,
         ):
-            url = self._build_url(href)
+            play_id = self._extract_play_id(href)
             name = re.sub(r"<[^>]*>", "", label).strip()
-            if not url or not name or "立即播放" in name or url in seen:
+            if not play_id or not name or "立即播放" in name or play_id in seen:
                 continue
-            seen.add(url)
-            episodes.append(f"{name}${url}")
+            seen.add(play_id)
+            episodes.append(f"{name}${play_id}")
 
         vod = {
             "vod_id": vod_id,
+            "path": self._build_detail_request_url(vod_id),
             "vod_name": title,
             "vod_pic": self._build_url(pic),
-            "vod_year": self._extract_text_by_prefix(html, ["年份："]),
-            "vod_area": self._extract_text_by_prefix(html, ["地区："]),
-            "vod_actor": self._extract_text_by_prefix(html, ["主演："]),
-            "vod_director": self._extract_text_by_prefix(html, ["导演："]),
-            "vod_content": content,
+            "vod_tag": "",
+            "vod_time": self._extract_detail_text(detail_root, html, "更新"),
+            "vod_remarks": self._clean_text(
+                ((detail_root.xpath('.//*[@id="rating"]//*[contains(@class,"branch")][1]//text()') or [""])[0]).strip()
+                or ((detail_root.xpath('.//*[@id="ratewords"][1]//text()') or [""])[0]).strip()
+            ),
             "vod_play_from": "独播库",
             "vod_play_url": "#".join(episodes),
+            "type_name": self._extract_detail_text(detail_root, html, "分类"),
+            "vod_content": content,
+            "vod_year": self._extract_detail_text(detail_root, html, "年份"),
+            "vod_area": self._extract_detail_text(detail_root, html, "地区"),
+            "vod_lang": "",
+            "vod_director": self._extract_detail_text(detail_root, html, "导演", joiner=","),
+            "vod_actor": self._extract_detail_text(detail_root, html, "主演", joiner=","),
         }
         return {"list": [vod]}
 
     def detailContent(self, ids):
         vod_id = ids[0]
-        html = self._request_html(vod_id, expect_xpath="//*[contains(@class,'title')]|//a[contains(@href,'/vodplay/')]")
+        html = self._request_html(
+            self._build_detail_request_url(vod_id),
+            expect_xpath="//*[contains(@class,'title')]|//a[contains(@href,'/vodplay/')]",
+        )
         return self._parse_detail_page(html, vod_id)
 
     def _parse_player_data(self, html):
@@ -256,7 +352,8 @@ class Spider(BaseSpider):
     def playerContent(self, flag, id, vipFlags):
         current = id
         for _ in range(3):
-            html = self._request_html(current, referer=self.host)
+            request_url = self._build_play_request_url(current)
+            html = self._request_html(request_url, referer=self.host)
             data = self._parse_player_data(html)
             if not data:
                 return {"parse": 0, "playUrl": "", "url": ""}
@@ -271,6 +368,6 @@ class Spider(BaseSpider):
                 "parse": 0,
                 "playUrl": "",
                 "url": play_url,
-                "header": self._build_player_headers(current),
+                "header": self._build_player_headers(request_url),
             }
         return {"parse": 0, "playUrl": "", "url": ""}

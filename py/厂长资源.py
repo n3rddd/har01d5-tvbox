@@ -5,8 +5,12 @@ import re
 import sys
 from urllib.parse import quote, urljoin
 
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import unpad
+try:
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import unpad
+except ModuleNotFoundError:
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Util.Padding import unpad
 
 from base.spider import Spider as BaseSpider
 

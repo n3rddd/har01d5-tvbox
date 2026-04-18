@@ -4,8 +4,12 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
-from Cryptodome.Cipher import AES
-from Cryptodome.Util.Padding import pad
+try:
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import pad
+except ModuleNotFoundError:
+    from Cryptodome.Cipher import AES
+    from Cryptodome.Util.Padding import pad
 
 
 ROOT = Path(__file__).resolve().parents[1]

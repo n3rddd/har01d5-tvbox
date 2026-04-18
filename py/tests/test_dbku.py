@@ -32,7 +32,7 @@ class TestDBKUSpider(unittest.TestCase):
             cards,
             [
                 {
-                    "vod_id": "https://www.dbku.tv/voddetail/123.html",
+                    "vod_id": "123",
                     "vod_name": "示例影片",
                     "vod_pic": "https://img.example/dbku.jpg",
                     "vod_remarks": "更新至10集",
@@ -93,7 +93,7 @@ class TestDBKUSpider(unittest.TestCase):
         </div>
         """
         result = self.spider.searchContent("繁花", False, "1")
-        self.assertEqual(result["list"][0]["vod_id"], "https://www.dbku.tv/voddetail/321.html")
+        self.assertEqual(result["list"][0]["vod_id"], "321")
         self.assertEqual(result["list"][0]["vod_name"], "搜索影片")
 
     def test_parse_detail_page_extracts_meta_and_episodes(self):
@@ -112,12 +112,66 @@ class TestDBKUSpider(unittest.TestCase):
         <a href="/vodplay/100-1-1.html">第1集</a>
         <a href="/vodplay/100-1-2.html">第2集</a>
         """
-        result = self.spider._parse_detail_page(html, "https://www.dbku.tv/voddetail/100.html")
+        result = self.spider._parse_detail_page(html, "100")
         vod = result["list"][0]
+        self.assertEqual(vod["vod_id"], "100")
         self.assertEqual(vod["vod_name"], "独播剧")
         self.assertEqual(vod["vod_year"], "2025")
         self.assertEqual(vod["vod_play_from"], "独播库")
-        self.assertIn("第1集$https://www.dbku.tv/vodplay/100-1-1.html", vod["vod_play_url"])
+        self.assertIn("第1集$100-1-1", vod["vod_play_url"])
+
+    def test_parse_detail_page_extracts_structured_fields_from_detail_block(self):
+        html = """
+        <div class="myui-content__thumb">
+          <img data-original="/poster-ai.jpg" />
+        </div>
+        <div class="myui-content__detail">
+          <h1 class="title">AI教我谈恋爱</h1>
+          <div id="rating" class="score" data-mid="1" data-id="143508" data-score="3">
+            <span class="branch">6</span>
+          </div>
+          <p class="data">
+            <span class="text-muted">分类：</span><a href="/vodshow/21-----------.html">短剧</a>
+            <span class="split-line"></span>
+            <span class="text-muted hidden-xs">地区：</span><a href="/vodshow/21-大陆----------.html">大陆</a>
+            <span class="split-line"></span>
+            <span class="text-muted hidden-xs">年份：</span><a href="/vodshow/21-----------2026.html">2026</a>
+          </p>
+          <p class="data hidden-sm"><span class="text-muted">更新：</span><span class="text-red">2026-04-18 09:59:00</span></p>
+          <p class="data">
+            <span class="text-muted">主演：</span>
+            <a href="/vodsearch/-%E7%AB%A0%E7%85%9C%E5%A5%87------------.html" target="_blank">章煜奇</a>&nbsp;
+            <a href="/vodsearch/-%E8%A2%81%E4%BC%8A------------.html" target="_blank">袁伊</a>&nbsp;
+            <a href="/vodsearch/-%E9%83%AD%E5%AD%90%E6%B8%9D------------.html" target="_blank">郭子渝</a>&nbsp;
+            <a href="/vodsearch/-%E5%88%98%E5%B8%8C%E5%A9%A7------------.html" target="_blank">刘希婧</a>&nbsp;
+          </p>
+          <p class="data">
+            <span class="text-muted">导演：</span>
+            <a href="/vodsearch/-----%E5%BC%A0%E4%B8%96%E5%8D%9A--------.html" target="_blank">张世博</a>&nbsp;
+            <a href="/vodsearch/-----%E6%BA%90%E8%AF%97%E5%98%89--------.html" target="_blank">源诗嘉</a>&nbsp;
+          </p>
+          <p class="data hidden-xs"><span class="text-muted">简介：</span>《AI教我谈恋爱》线上看，共26集，《AI教我谈恋爱》简介:漫画家袁七柚意外绑定...<a href="#desc">详情</a></p>
+        </div>
+        <a href="/vodplay/143508-1-1.html">第1集</a>
+        """
+        result = self.spider._parse_detail_page(html, "143508")
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_id"], "143508")
+        self.assertEqual(vod["path"], "https://www.dbku.tv/voddetail/143508.html")
+        self.assertEqual(vod["vod_pic"], "https://www.dbku.tv/poster-ai.jpg")
+        self.assertEqual(vod["type_name"], "短剧")
+        self.assertEqual(vod["vod_area"], "大陆")
+        self.assertEqual(vod["vod_year"], "2026")
+        self.assertEqual(vod["vod_time"], "2026-04-18 09:59:00")
+        self.assertEqual(vod["vod_actor"], "章煜奇,袁伊,郭子渝,刘希婧")
+        self.assertEqual(vod["vod_director"], "张世博,源诗嘉")
+        self.assertEqual(vod["vod_content"], "《AI教我谈恋爱》线上看，共26集，《AI教我谈恋爱》简介:漫画家袁七柚意外绑定...")
+        self.assertEqual(vod["vod_play_url"], "第1集$143508-1-1")
+        self.assertEqual(vod["vod_tag"], "")
+        self.assertEqual(vod["vod_remarks"], "6")
+        self.assertEqual(vod["vod_lang"], "")
+        self.assertNotIn("dbid", vod)
+        self.assertNotIn("type", vod)
 
     @patch.object(Spider, "_request_html")
     def test_detail_content_reads_from_vod_id_url(self, mock_request_html):
@@ -125,8 +179,9 @@ class TestDBKUSpider(unittest.TestCase):
         <h1 class="title">详情影片</h1>
         <a href="/vodplay/200-1-1.html">第1集</a>
         """
-        result = self.spider.detailContent(["https://www.dbku.tv/voddetail/200.html"])
-        self.assertEqual(result["list"][0]["vod_id"], "https://www.dbku.tv/voddetail/200.html")
+        result = self.spider.detailContent(["200"])
+        self.assertEqual(mock_request_html.call_args.args[0], "https://www.dbku.tv/voddetail/200.html")
+        self.assertEqual(result["list"][0]["vod_id"], "200")
         self.assertEqual(result["list"][0]["vod_name"], "详情影片")
 
     def test_parse_player_data_reads_json_block(self):
@@ -162,10 +217,28 @@ class TestDBKUSpider(unittest.TestCase):
         var player_data = {"url":"https://video.example/final.m3u8","encrypt":"0"};
         </script>
         """
-        result = self.spider.playerContent("独播库", "https://www.dbku.tv/vodplay/100-1-1.html", {})
+        result = self.spider.playerContent("独播库", "100-1-1", {})
         self.assertEqual(result["parse"], 0)
         self.assertEqual(result["url"], "https://video.example/final.m3u8")
         self.assertEqual(result["header"]["Referer"], "https://www.dbku.tv/vodplay/100-1-1.html")
+
+    @patch.object(Spider, "log")
+    @patch.object(Spider, "_request_html")
+    def test_player_content_logs_resolved_player_fields(self, mock_request_html, mock_log):
+        mock_request_html.return_value = """
+        <script>
+        var player_data = {"url":"aHR0cHM6Ly92aWRlby5leGFtcGxlL2ZpbmFsLm0zdTg=","encrypt":"2"};
+        </script>
+        """
+        self.spider.playerContent("独播库", "100-1-1", {})
+        mock_log.assert_called()
+        payload = mock_log.call_args.args[0]
+        self.assertEqual(payload["stage"], "playerContent")
+        self.assertEqual(payload["input_url"], "100-1-1")
+        self.assertEqual(payload["request_url"], "https://www.dbku.tv/vodplay/100-1-1.html")
+        self.assertEqual(payload["encrypt"], 2)
+        self.assertEqual(payload["decoded_url"], "https://video.example/final.m3u8")
+        self.assertEqual(payload["final_url"], "https://video.example/final.m3u8")
 
     @patch.object(Spider, "_request_html")
     def test_player_content_follows_internal_jump(self, mock_request_html):
@@ -173,7 +246,7 @@ class TestDBKUSpider(unittest.TestCase):
             '<script>var player_data = {"url":"/vodplay/100-1-2.html","encrypt":"0"};</script>',
             '<script>var player_data = {"url":"https://video.example/jump-final.m3u8","encrypt":"0"};</script>',
         ]
-        result = self.spider.playerContent("独播库", "https://www.dbku.tv/vodplay/100-1-1.html", {})
+        result = self.spider.playerContent("独播库", "100-1-1", {})
         self.assertEqual(result["parse"], 0)
         self.assertEqual(result["url"], "https://video.example/jump-final.m3u8")
 
