@@ -58,7 +58,19 @@ class TestYouKnowSpider(unittest.TestCase):
         """
         result = self.spider.categoryContent("movie", "2", False, {})
         self.assertEqual(result["page"], 2)
+        self.assertEqual(mock_request_html.call_args.args[0], "/show/2--------2---/")
         self.assertEqual(result["list"][0]["vod_id"], "222")
+
+    @patch.object(Spider, "_request_html")
+    def test_category_content_uses_page1_path_without_page_number(self, mock_request_html):
+        mock_request_html.return_value = """
+        <a class="module-poster-item" href="/v/555.html" title="分类第一页" data-original="/page1.jpg">
+          <div class="module-item-note">HD</div>
+        </a>
+        """
+        result = self.spider.categoryContent("movie", "1", False, {})
+        self.assertEqual(mock_request_html.call_args.args[0], "/show/2-----------/")
+        self.assertEqual(result["list"][0]["vod_id"], "555")
 
     @patch.object(Spider, "_request_html")
     def test_search_content_reuses_card_parser(self, mock_request_html):

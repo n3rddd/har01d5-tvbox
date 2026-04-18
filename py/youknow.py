@@ -144,6 +144,23 @@ class Spider(BaseSpider):
             "total": pagecount * max(len(items), 1),
         }
 
+    def _build_category_path(self, tid, pg):
+        page = int(pg)
+        if tid == "index":
+            return self.category_paths["index"]
+        type_map = {
+            "drama": "1",
+            "movie": "2",
+            "variety": "3",
+            "anime": "4",
+            "short": "55",
+            "doc": "5",
+        }
+        type_id = type_map.get(tid, "2")
+        if page <= 1:
+            return f"/show/{type_id}-----------/"
+        return f"/show/{type_id}--------{page}---/"
+
     def _clean_text(self, text):
         return re.sub(r"\s+", " ", str(text or "").replace("\xa0", " ")).strip()
 
@@ -249,7 +266,7 @@ class Spider(BaseSpider):
         return {"list": self._parse_list_cards(html)}
 
     def categoryContent(self, tid, pg, filter, extend):
-        path = self.category_paths.get(tid, self.category_paths["movie"]).format(pg=pg)
+        path = self._build_category_path(tid, pg)
         html = self._request_html(
             path,
             expect_xpath="//*[contains(@class,'module-poster-item') or contains(@class,'module-card-item-poster')]",
