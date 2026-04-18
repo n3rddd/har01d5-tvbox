@@ -37,6 +37,8 @@ https://raw.githubusercontent.com/fanmingming/live/refs/heads/main/e.xml
 ### Stymei
 https://raw.githubusercontent.com/Jsnzkpg/Jsnzkpg/refs/heads/Jsnzkpg/Jsnzkpg1.m3u ⭐
 
+https://gitee.com/gsls200808/xmltvepg/raw/master/e9.xml.gz
+
 ### 其它
 https://raw.githubusercontent.com/kimwang1978/collect-txt/refs/heads/main/bbxx_lite.m3u
 
