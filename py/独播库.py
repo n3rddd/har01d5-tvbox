@@ -1,7 +1,9 @@
 # coding=utf-8
+import base64
+import json
 import re
 import sys
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from lxml import etree
 
@@ -212,3 +214,35 @@ class Spider(BaseSpider):
         vod_id = ids[0]
         html = self._request_html(vod_id, expect_xpath="//*[contains(@class,'title')]|//a[contains(@href,'/vodplay/')]")
         return self._parse_detail_page(html, vod_id)
+
+    def _parse_player_data(self, html):
+        matched = re.search(r"var\s+player_data\s*=\s*(\{[\s\S]*?\})\s*;?\s*</script>", html, re.I)
+        if not matched:
+            matched = re.search(r"var\s+player_[^=]*\s*=\s*(\{[\s\S]*?\})\s*;?\s*</script>", html, re.I)
+        if not matched:
+            return None
+        try:
+            return json.loads(matched.group(1))
+        except Exception:
+            return None
+
+    def _decode_play_url_by_encrypt(self, value, encrypt):
+        raw = str(value or "")
+        mode = int(encrypt or 0)
+        if not raw:
+            return ""
+        try:
+            if mode == 1:
+                return unquote(raw)
+            if mode == 2:
+                decoded = base64.b64decode(raw).decode("utf-8")
+                return unquote(decoded)
+            if mode == 3:
+                text = raw[8:] if len(raw) > 16 else raw
+                text = base64.b64decode(text).decode("utf-8")
+                if len(text) > 16:
+                    text = text[8:-8]
+                return text
+            return raw
+        except Exception:
+            return raw

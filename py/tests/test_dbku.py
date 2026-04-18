@@ -1,4 +1,5 @@
 import unittest
+import base64
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
@@ -127,6 +128,32 @@ class TestDBKUSpider(unittest.TestCase):
         result = self.spider.detailContent(["https://www.dbku.tv/voddetail/200.html"])
         self.assertEqual(result["list"][0]["vod_id"], "https://www.dbku.tv/voddetail/200.html")
         self.assertEqual(result["list"][0]["vod_name"], "详情影片")
+
+    def test_parse_player_data_reads_json_block(self):
+        html = '<script>var player_data = {"url":"https://video.example/a.m3u8","encrypt":"0"};</script>'
+        data = self.spider._parse_player_data(html)
+        self.assertEqual(data["url"], "https://video.example/a.m3u8")
+
+    def test_decode_play_url_by_encrypt_supports_modes_0_1_2_3(self):
+        self.assertEqual(
+            self.spider._decode_play_url_by_encrypt("https://video.example/raw.m3u8", 0),
+            "https://video.example/raw.m3u8",
+        )
+        self.assertEqual(
+            self.spider._decode_play_url_by_encrypt("https%3A//video.example/escape.m3u8", 1),
+            "https://video.example/escape.m3u8",
+        )
+        mode2 = base64.b64encode("https://video.example/base64.m3u8".encode("utf-8")).decode("utf-8")
+        self.assertEqual(
+            self.spider._decode_play_url_by_encrypt(mode2, 2),
+            "https://video.example/base64.m3u8",
+        )
+        mode3_raw = "ABCDEFGHhttps://video.example/trimmed.m3u8HGFEDCBA"
+        mode3 = base64.b64encode(mode3_raw.encode("utf-8")).decode("utf-8")
+        self.assertEqual(
+            self.spider._decode_play_url_by_encrypt("12345678" + mode3, 3),
+            "https://video.example/trimmed.m3u8",
+        )
 
 
 if __name__ == "__main__":
