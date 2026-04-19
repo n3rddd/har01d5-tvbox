@@ -193,6 +193,85 @@ class TestWooyunSpider(unittest.TestCase):
         self.assertEqual(body["topCode"], "")
         self.assertEqual(result["list"][0]["vod_id"], "15")
 
+    def test_build_play_sources_encodes_multiple_seasons(self):
+        seasons = [
+            {
+                "seasonNo": 1,
+                "videoList": [
+                    {"id": 101, "epNo": 1, "remark": "", "playUrl": "/play-1.m3u8"},
+                    {"id": 102, "epNo": 2, "remark": "加更", "playUrl": "/play-2.m3u8"},
+                ],
+            },
+            {
+                "seasonNo": 2,
+                "videoList": [
+                    {"id": 201, "epNo": 1, "remark": "", "playUrl": "/play-3.m3u8"},
+                ],
+            },
+        ]
+        payload = self.spider._build_play_sources(seasons, "99")
+        self.assertEqual(payload["vod_play_from"], "第1季$$$第2季")
+        self.assertIn("第1集$", payload["vod_play_url"])
+        self.assertIn("第2集 加更$", payload["vod_play_url"])
+
+    def test_decode_play_id_round_trips_base64url_payload(self):
+        encoded = self.spider._encode_play_payload(
+            {
+                "mediaId": "88",
+                "seasonNo": 1,
+                "epNo": 3,
+                "videoId": 12,
+                "playUrl": "/video.m3u8",
+                "name": "第3集",
+            }
+        )
+        decoded = self.spider._decode_play_id(encoded)
+        self.assertEqual(decoded["mediaId"], "88")
+        self.assertEqual(decoded["seasonNo"], 1)
+        self.assertEqual(decoded["epNo"], 3)
+        self.assertEqual(decoded["playUrl"], "/video.m3u8")
+
+    @patch.object(Spider, "_request_json")
+    def test_detail_content_merges_detail_apis_and_videos(self, mock_request_json):
+        mock_request_json.side_effect = [
+            {"id": 300, "title": "基础标题", "posterUrl": "/base.jpg"},
+            {
+                "id": 300,
+                "title": "完整标题",
+                "posterUrlS3": "https://img.example/detail.jpg",
+                "mediaType": {"code": "tv_series", "name": "电视剧"},
+                "episodeStatus": "更新至2集",
+                "releaseYear": "2026",
+                "region": "大陆",
+                "actors": ["张三", "李四"],
+                "directors": ["王五"],
+                "overview": "一段简介",
+                "rating": "9.1",
+            },
+            [
+                {
+                    "seasonNo": 1,
+                    "videoList": [
+                        {"id": 901, "epNo": 1, "remark": "", "playUrl": "/ep1.m3u8"},
+                        {"id": 902, "epNo": 2, "remark": "超前", "playUrl": "/ep2.m3u8"},
+                    ],
+                }
+            ],
+        ]
+        result = self.spider.detailContent(["300"])
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_id"], "300")
+        self.assertEqual(vod["vod_name"], "完整标题")
+        self.assertEqual(vod["vod_pic"], "https://img.example/detail.jpg")
+        self.assertEqual(vod["type_name"], "电视剧")
+        self.assertEqual(vod["vod_area"], "大陆")
+        self.assertEqual(vod["vod_actor"], "张三/李四")
+        self.assertEqual(vod["vod_director"], "王五")
+        self.assertEqual(vod["vod_content"], "一段简介")
+        self.assertEqual(vod["vod_douban_score"], "9.1")
+        self.assertEqual(vod["vod_play_from"], "乌云影视")
+        self.assertIn("第2集 超前$", vod["vod_play_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

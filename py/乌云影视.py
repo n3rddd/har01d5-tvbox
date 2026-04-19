@@ -1,4 +1,5 @@
 # coding=utf-8
+import base64
 import json
 import math
 import sys
@@ -272,3 +273,82 @@ class Spider(BaseSpider):
         total = int(data.get("total") or 0)
         pagecount = int(data.get("pages") or (math.ceil(total / self.page_size) if total else (page if records else 0)))
         return {"page": page, "pagecount": pagecount, "total": total, "list": records}
+
+    def _encode_play_payload(self, payload):
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+    def _decode_play_id(self, play_id):
+        raw = self._stringify(play_id).strip()
+        padding = "=" * (-len(raw) % 4)
+        try:
+            return json.loads(base64.urlsafe_b64decode((raw + padding).encode("utf-8")).decode("utf-8"))
+        except Exception:
+            return {"mediaId": raw, "playUrl": raw}
+
+    def _build_play_sources(self, seasons, media_id):
+        season_list = self._ensure_list(seasons)
+        multiple = len(season_list) > 1
+        from_list = []
+        url_list = []
+        for index, season in enumerate(season_list, start=1):
+            season_no = season.get("seasonNo") or index
+            episode_entries = []
+            for video_index, video in enumerate(self._ensure_list(season.get("videoList")), start=1):
+                ep_no = int(video.get("epNo") or video_index)
+                remark = self._stringify(video.get("remark")).strip()
+                if ep_no > 0:
+                    name = f"第{ep_no}集" if not remark else f"第{ep_no}集 {remark}"
+                else:
+                    name = remark or "正片"
+                payload = self._encode_play_payload(
+                    {
+                        "mediaId": self._stringify(media_id),
+                        "seasonNo": season_no,
+                        "epNo": ep_no,
+                        "videoId": video.get("id"),
+                        "playUrl": video.get("playUrl"),
+                        "name": name,
+                    }
+                )
+                episode_entries.append(f"{name}${payload}")
+            if episode_entries:
+                from_list.append(
+                    f"第{season_no}季"
+                    if multiple
+                    else self._stringify(season.get("lineName") or season.get("title") or self.name)
+                )
+                url_list.append("#".join(episode_entries))
+        return {"vod_play_from": "$$$".join(from_list), "vod_play_url": "$$$".join(url_list)}
+
+    def detailContent(self, ids):
+        result = {"list": []}
+        for raw_id in ids:
+            media_id = self._stringify(raw_id).strip()
+            if not media_id:
+                continue
+            base_detail = self._request_json(f"/movie/media/base/detail?mediaId={media_id}") or {}
+            detail = self._request_json(f"/movie/media/detail?mediaId={media_id}") or {}
+            seasons = self._request_json(
+                f"/movie/media/video/list?mediaId={media_id}&lineName=&resolutionCode="
+            ) or []
+            merged = detail or base_detail
+            play_data = self._build_play_sources(seasons, media_id)
+            result["list"].append(
+                {
+                    "vod_id": self._stringify(merged.get("id") or media_id),
+                    "vod_name": self._stringify(merged.get("title") or base_detail.get("title")),
+                    "vod_pic": self._pick_poster(merged or base_detail),
+                    "type_id": self._stringify((merged.get("mediaType") or {}).get("code")),
+                    "type_name": self._stringify((merged.get("mediaType") or {}).get("name")),
+                    "vod_remarks": self._stringify(merged.get("episodeStatus")),
+                    "vod_year": self._stringify(merged.get("releaseYear")),
+                    "vod_area": self._stringify(merged.get("region")),
+                    "vod_actor": self._join_text(merged.get("actors")),
+                    "vod_director": self._join_text(merged.get("directors")),
+                    "vod_content": self._stringify(merged.get("overview") or merged.get("description")),
+                    "vod_douban_score": self._stringify(merged.get("rating")),
+                    **play_data,
+                }
+            )
+        return result
