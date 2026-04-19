@@ -267,3 +267,18 @@ class Spider(BaseSpider):
             vod = self._parse_detail_page(self._request_html(vod_id), vod_id)
             result["list"].append(vod)
         return result
+
+    def _is_pan_flag(self, flag):
+        lowered = self._stringify(flag).lower()
+        return any(token in lowered for token in ["quark", "baidu", "xunlei"])
+
+    def playerContent(self, flag, id, vipFlags):
+        target = self._stringify(id).strip()
+        if self._is_pan_flag(flag):
+            return {"parse": 0, "jx": 0, "url": target, "header": {}}
+        return {
+            "parse": 0,
+            "jx": 0,
+            "url": self._build_url(target),
+            "header": dict(self.headers),
+        }

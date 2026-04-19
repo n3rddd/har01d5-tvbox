@@ -185,6 +185,26 @@ class TestDDYSSpider(unittest.TestCase):
         self.assertEqual(result["list"][0]["vod_play_from"], "直连")
         self.assertEqual(result["list"][0]["vod_play_url"], "全集$/play/detail-demo")
 
+    def test_player_content_returns_full_url_for_direct_source(self):
+        result = self.spider.playerContent("DDYS", "/play/ep1", {})
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["jx"], 0)
+        self.assertEqual(result["url"], "https://ddys.io/play/ep1")
+        self.assertEqual(result["header"]["Referer"], "https://ddys.io/")
+
+    def test_player_content_returns_pan_link_without_rewriting(self):
+        result = self.spider.playerContent("quark", "https://pan.quark.cn/s/demo", {})
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["jx"], 0)
+        self.assertEqual(result["url"], "https://pan.quark.cn/s/demo")
+        self.assertEqual(result["header"], {})
+
+    def test_player_content_treats_baidu_and_xunlei_as_pan_sources(self):
+        baidu = self.spider.playerContent("baidu", "https://pan.baidu.com/s/demo", {})
+        xunlei = self.spider.playerContent("xunlei", "https://pan.xunlei.com/s/demo", {})
+        self.assertEqual(baidu["url"], "https://pan.baidu.com/s/demo")
+        self.assertEqual(xunlei["url"], "https://pan.xunlei.com/s/demo")
+
 
 if __name__ == "__main__":
     unittest.main()
