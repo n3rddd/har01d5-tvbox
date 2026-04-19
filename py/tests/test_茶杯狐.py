@@ -123,6 +123,24 @@ class TestCupfoxSpider(unittest.TestCase):
         self.assertEqual(data["url"], "vid-1")
         self.assertEqual(data["from"], "lineA")
 
+    def test_extract_player_data_supports_nested_object_literal(self):
+        html = """
+        <script>
+        var player_aaaa={
+          "flag":"play",
+          "encrypt":0,
+          "vod_data":{"vod_name":"八千里路云和月","vod_actor":"王阳,万茜"},
+          "url":"DJP5QlL6j66wOTl+NrtIwkJCenh0ZVBlTHJzTWJWd0Y1eTNBd1crTmt5NmpjK05XOTFxb25iSTJ4d2RSUms4YllrVVhSU2xyK0JGcFFZZThibmVqU1BWUFlEMnVWTUpQVmR1Vm9FZHJJWlFaaHNaR3pmTHYwbjVyUE11dkdwbzVOMTJpRFpBK3cvYUl5RnNuQXNaelFZZ0plWVhWYitFenJOMHhUZz09",
+          "from":"rb",
+          "server":"no"
+        };
+        </script>
+        """
+        data = self.spider._extract_player_data(html)
+        self.assertEqual(data["encrypt"], 0)
+        self.assertEqual(data["vod_data"]["vod_name"], "八千里路云和月")
+        self.assertEqual(data["from"], "rb")
+
     def test_decode2_recovers_shifted_text(self):
         encoded = "QXdCQ2tE"
         self.assertEqual(self.spider._decode2(encoded), "P0")

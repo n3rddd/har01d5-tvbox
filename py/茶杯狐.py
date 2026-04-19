@@ -160,13 +160,57 @@ class Spider(BaseSpider):
         return second["text"]
 
     def _extract_player_data(self, html_text):
-        matched = re.search(r"player_aaaa\s*=\s*(\{[\s\S]*?\})\s*;?", str(html_text or ""))
+        text = str(html_text or "")
+        matched = re.search(r"player_aaaa\s*=", text, re.I)
         if not matched:
             return None
+        object_start = text.find("{", matched.end())
+        if object_start < 0:
+            return None
+        raw_object = self._extract_balanced_object(text, object_start)
+        if not raw_object:
+            return None
         try:
-            return json.loads(matched.group(1))
+            return json.loads(raw_object)
         except Exception:
             return None
+
+    def _extract_balanced_object(self, text, start_index):
+        raw = str(text or "")
+        if start_index < 0 or start_index >= len(raw) or raw[start_index] != "{":
+            return ""
+
+        depth = 0
+        in_string = False
+        quote_char = ""
+        escaped = False
+
+        for index in range(start_index, len(raw)):
+            char = raw[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote_char:
+                    in_string = False
+                continue
+
+            if char in ('"', "'"):
+                in_string = True
+                quote_char = char
+                continue
+
+            if char == "{":
+                depth += 1
+                continue
+
+            if char == "}":
+                depth -= 1
+                if depth == 0:
+                    return raw[start_index : index + 1]
+
+        return ""
 
     def _decode2(self, encoded):
         if not encoded:
