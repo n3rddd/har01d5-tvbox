@@ -1,5 +1,6 @@
 # coding=utf-8
 import base64
+import hashlib
 import json
 import random
 import re
@@ -344,3 +345,111 @@ class Spider(BaseSpider):
                 }
             )
         return result
+
+    def _base64_decode(self, value):
+        if not value:
+            return ""
+        try:
+            cleaned = str(value).replace("\n", "").replace("\r", "")
+            return base64.b64decode(cleaned.encode("utf-8")).decode("utf-8")
+        except Exception:
+            return ""
+
+    def _md5(self, value):
+        return hashlib.md5(str(value or "").encode("utf-8")).hexdigest()
+
+    def _decode1_sign(self, encoded):
+        try:
+            first = self._base64_decode(encoded)
+            key = self._md5("test")
+            xor_text = "".join(
+                [chr(ord(first[index]) ^ ord(key[index % len(key)])) for index in range(len(first))]
+            )
+            decoded = self._base64_decode(xor_text)
+            parts = decoded.split("/")
+            if len(parts) < 3:
+                return ""
+            plain_map = json.loads(self._base64_decode(parts[0]))
+            cipher_map = json.loads(self._base64_decode(parts[1]))
+            path = self._base64_decode("/".join(parts[2:]))
+            output = ""
+            for char in path:
+                if char.isalpha() and char in plain_map:
+                    index = cipher_map.index(char) if char in cipher_map else -1
+                    output += plain_map[index] if index != -1 else char
+                else:
+                    output += char
+            return output
+        except Exception:
+            return ""
+
+    def _decode_play_url(self, data):
+        url = str((data or {}).get("url") or "").strip()
+        mode = int((data or {}).get("urlmode") or 0)
+        if not url:
+            return ""
+        if mode == 1:
+            return self._decode1_sign(url)
+        if mode == 2:
+            return self._decode2(url)
+        return url
+
+    def _is_placeholder_url(self, url):
+        value = str(url or "").strip()
+        if not value:
+            return True
+        if not re.match(r"^(https?:)?//", value) and not value.startswith("magnet:"):
+            return True
+        return (
+            "baidu.com/404.mp4" in value
+            or re.search(r"/404\.mp4($|[?#])", value) is not None
+            or re.search(r"(^|[?&])code=403($|&)", value) is not None
+            or "forbidden" in value.lower()
+        )
+
+    def playerContent(self, flag, id, vipFlags):
+        play_url = self._decode_play_id(id)
+        if not play_url:
+            return {"parse": 1, "url": str(id or ""), "header": dict(self.headers)}
+        try:
+            html = self._request_with_firewall(play_url)
+            player = self._extract_player_data(html) or {}
+            vid = str(player.get("url") or "").strip()
+            if not vid:
+                raise ValueError("missing player url")
+
+            muiplayer_url = self.host + "/foxplay/muiplayer.php?vid=" + quote(vid)
+            api = self._request_text(
+                self.host + "/foxplay/api.php",
+                method="POST",
+                body="vid=" + quote(vid),
+                headers={
+                    "User-Agent": self.headers["User-Agent"],
+                    "Referer": muiplayer_url,
+                    "Origin": self.host,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Accept": "*/*",
+                },
+            )
+            payload = json.loads(api["text"] or "{}")
+            real_url = self._decode_play_url(payload.get("data") or {})
+            if real_url and not self._is_placeholder_url(real_url):
+                return {
+                    "parse": 0,
+                    "url": real_url,
+                    "header": {
+                        "User-Agent": self.headers["User-Agent"],
+                        "Referer": muiplayer_url,
+                    },
+                }
+        except Exception:
+            pass
+        return {
+            "parse": 1,
+            "url": play_url,
+            "header": {
+                "User-Agent": self.headers["User-Agent"],
+                "Referer": play_url,
+            },
+        }

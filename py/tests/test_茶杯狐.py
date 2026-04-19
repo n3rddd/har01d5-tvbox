@@ -194,3 +194,54 @@ class TestCupfoxSpider(unittest.TestCase):
         self.assertEqual(vod["vod_play_from"], "线路一$$$线路二")
         self.assertIn("第1集$play/p1", vod["vod_play_url"])
         self.assertIn("正片$play/p3", vod["vod_play_url"])
+
+    def test_placeholder_url_detection(self):
+        self.assertTrue(self.spider._is_placeholder_url("https://a.example/404.mp4"))
+        self.assertTrue(self.spider._is_placeholder_url("https://a.example/v.m3u8?code=403"))
+        self.assertFalse(self.spider._is_placeholder_url("https://media.example/video.m3u8"))
+
+    def test_player_content_returns_decoded_api_url(self):
+        play_html = '<script>player_aaaa={"url":"vid-99","from":"line","server":"no"};</script>'
+
+        def fake_request(url, method="GET", body=None, headers=None):
+            if "foxplay/api.php" in url:
+                return {
+                    "status_code": 200,
+                    "text": '{"data":{"url":"https://media.example/video.m3u8","urlmode":0}}',
+                    "headers": {},
+                }
+            raise AssertionError(url)
+
+        self.spider._request_with_firewall = lambda url: play_html
+        self.spider._request_text = fake_request
+        result = self.spider.playerContent("线路一", "play/p99", [])
+
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["url"], "https://media.example/video.m3u8")
+        self.assertIn("muiplayer.php?vid=vid-99", result["header"]["Referer"])
+
+    def test_player_content_falls_back_when_api_returns_placeholder(self):
+        play_html = '<script>player_aaaa={"url":"vid-77","from":"line","server":"no"};</script>'
+
+        def fake_request(url, method="GET", body=None, headers=None):
+            return {
+                "status_code": 200,
+                "text": '{"data":{"url":"https://www.cupfox.ai/404.mp4","urlmode":0}}',
+                "headers": {},
+            }
+
+        self.spider._request_with_firewall = lambda url: play_html
+        self.spider._request_text = fake_request
+        result = self.spider.playerContent("线路一", "play/p77", [])
+
+        self.assertEqual(result["parse"], 1)
+        self.assertEqual(result["url"], "https://www.cupfox.ai/play/p77.html")
+
+    def test_search_content_returns_empty_result_for_blank_keyword(self):
+        self.assertEqual(self.spider.searchContent("", False, "1"), {"page": 1, "total": 0, "list": []})
+
+    def test_player_content_falls_back_when_missing_player_data(self):
+        self.spider._request_with_firewall = lambda url: "<html></html>"
+        result = self.spider.playerContent("线路一", "play/p11", [])
+        self.assertEqual(result["parse"], 1)
+        self.assertEqual(result["url"], "https://www.cupfox.ai/play/p11.html")
