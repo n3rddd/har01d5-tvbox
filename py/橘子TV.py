@@ -191,6 +191,37 @@ class Spider(BaseSpider):
                 names.append(item.get("vodWorkerName"))
         return ",".join(names)
 
+    def _quality_score(self, show_name, resolution):
+        text = "{0} {1}".format(str(show_name or "").lower(), str(resolution or "").lower())
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if digits:
+            try:
+                return int(digits)
+            except Exception:
+                pass
+
+        named_scores = {
+            "原画": 5000,
+            "蓝光": 4500,
+            "4k": 4000,
+            "2160": 4000,
+            "超清": 3000,
+            "uhd": 3000,
+            "1080": 2800,
+            "fhd": 2800,
+            "高清": 2000,
+            "hd": 2000,
+            "720": 1800,
+            "标清": 1000,
+            "sd": 1000,
+            "流畅": 500,
+            "ld": 500,
+        }
+        for key, score in named_scores.items():
+            if key in text:
+                return score
+        return 0
+
     def detailContent(self, ids):
         vod_id = ids[0]
         response = self._post_api("/v2/api/vodInfo/index", self._build_payload({"vodId": vod_id}))
@@ -225,7 +256,7 @@ class Spider(BaseSpider):
 
     def playerContent(self, flag, id, vipFlags):
         response = self._post_api("/v2/api/vodInfo/epDetail", self._build_payload({"vodEpId": id}))
-        urls = []
+        candidates = []
 
         for item in response.get("data", []):
             show_name = item.get("showName")
@@ -239,11 +270,24 @@ class Spider(BaseSpider):
             )
             play_url = play_response.get("data", {}).get("playUrl", "")
             if str(play_url).startswith("http"):
-                urls.extend([show_name, play_url])
+                candidates.append(
+                    {
+                        "showName": show_name,
+                        "vodResolution": resolution,
+                        "playUrl": play_url,
+                        "score": self._quality_score(show_name, resolution),
+                    }
+                )
+
+        if not candidates:
+            return {"parse": 0, "playUrl": "", "url": ""}
+
+        best = sorted(candidates, key=lambda item: item["score"], reverse=True)[0]
 
         return {
             "parse": 0,
-            "url": urls,
+            "playUrl": "",
+            "url": best["playUrl"],
             "header": {
                 "User-Agent": "ExoPlayer",
                 "Connection": "Keep-Alive",

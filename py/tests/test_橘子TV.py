@@ -253,7 +253,7 @@ class TestJuZiTVSpider(unittest.TestCase):
 
     @patch.object(Spider, "_post_api")
     @patch.object(Spider, "fetch")
-    def test_player_content_collects_resolution_urls(self, mock_fetch, mock_post_api):
+    def test_player_content_returns_best_resolution_url(self, mock_fetch, mock_post_api):
         class FakeResponse:
             def __init__(self, text):
                 self.text = text
@@ -274,11 +274,35 @@ class TestJuZiTVSpider(unittest.TestCase):
         self.spider.init()
         result = self.spider.playerContent("线路A", "ep-a-1", {})
         self.assertEqual(result["parse"], 0)
-        self.assertEqual(
-            result["url"],
-            ["高清", "https://cdn.example.com/1080.m3u8", "标清", "https://cdn.example.com/720.m3u8"],
-        )
+        self.assertEqual(result["playUrl"], "")
+        self.assertEqual(result["url"], "https://cdn.example.com/1080.m3u8")
         self.assertEqual(result["header"]["User-Agent"], "ExoPlayer")
+
+    @patch.object(Spider, "_post_api")
+    @patch.object(Spider, "fetch")
+    def test_player_content_prefers_higher_ranked_named_quality(self, mock_fetch, mock_post_api):
+        class FakeResponse:
+            def __init__(self, text):
+                self.text = text
+                self.status_code = 200
+                self.encoding = "utf-8"
+
+        mock_fetch.return_value = FakeResponse('["https://api1.example.com"]')
+        mock_post_api.side_effect = [
+            {
+                "data": [
+                    {"showName": "流畅", "vodResolution": "sd"},
+                    {"showName": "超清", "vodResolution": "uhd"},
+                    {"showName": "高清", "vodResolution": "hd"},
+                ]
+            },
+            {"data": {"playUrl": "https://cdn.example.com/sd.m3u8"}},
+            {"data": {"playUrl": "https://cdn.example.com/uhd.m3u8"}},
+            {"data": {"playUrl": "https://cdn.example.com/hd.m3u8"}},
+        ]
+        self.spider.init()
+        result = self.spider.playerContent("线路A", "ep-a-1", {})
+        self.assertEqual(result["url"], "https://cdn.example.com/uhd.m3u8")
 
 
 if __name__ == "__main__":
