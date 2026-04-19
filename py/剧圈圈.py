@@ -16,10 +16,12 @@ class Spider(BaseSpider):
     def __init__(self):
         self.name = "剧圈圈"
         self.host = "https://www.jqqzx.cc"
+        self._category_vodshow_unavailable = False
         self.headers = {
             "User-Agent": "Mozilla/5.0",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Referer": self.host + "/",
+            "Cookie": "gg_iscookie=1; gg_show_number6122=4; gg_iscookie=1; gg_show_number6122=3; mx_style=white; showBtn=true; mac_history_mxpro=%5B%7B%22vod_name%22%3A%22%E5%81%8F%E5%81%8F%E9%81%87%E8%A7%81%E4%BD%A0%22%2C%22vod_url%22%3A%22https%3A%2F%2Fwww.jqqzx.cc%2Fplay%2F62215-5-1.html%22%2C%22vod_part%22%3A%2201%22%7D%2C%7B%22vod_name%22%3A%22%E6%9C%88%E9%B3%9E%E7%BB%AE%E7%BA%AA%22%2C%22vod_url%22%3A%22https%3A%2F%2Fwww.jqqzx.cc%2Fplay%2F61941-2-1.html%22%2C%22vod_part%22%3A%22%E7%AC%AC1%E9%9B%86%22%7D%5D; PHPSESSID=gtc81g6q1dnisr5f6gldv4aivq",
         }
         self.categories = [
             {"type_id": "dianying", "type_name": "电影"},
@@ -128,12 +130,26 @@ class Spider(BaseSpider):
     def homeVideoContent(self):
         return {"list": self._parse_cards(self._request_html(self.host))[:40]}
 
+    def _build_vodshow_category_url(self, tid, page):
+        if page <= 1:
+            return self._build_url(f"/vodshow/id/{tid}.html")
+        return self._build_url(f"/vodshow/id/{tid}/page/{page}.html")
+
+    def _build_type_category_url(self, tid, page):
+        return self._build_url(f"/type/{tid}/page/{page}.html")
+
     def categoryContent(self, tid, pg, filter, extend):
         page = int(pg)
-        items = self._parse_cards(self._request_html(self._build_url(f"/type/{tid}/page/{page}.html")))
+        items = []
+        if not self._category_vodshow_unavailable:
+            items = self._parse_cards(self._request_html(self._build_vodshow_category_url(tid, page)))
+            if not items:
+                self._category_vodshow_unavailable = True
+        if not items:
+            items = self._parse_cards(self._request_html(self._build_type_category_url(tid, page)))
         return {
             "page": page,
-            "total": page * len(items) + (1 if items else 0),
+            "total": page * 30 + len(items),
             "list": items,
         }
 

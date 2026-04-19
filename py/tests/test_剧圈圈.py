@@ -2,7 +2,7 @@ import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from requests.exceptions import ConnectionError
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,17 +74,47 @@ class TestJuQuanQuanSpider(unittest.TestCase):
         self.assertEqual(result["list"][0]["vod_id"], "vod/1")
 
     @patch.object(Spider, "_request_html")
-    def test_category_content_builds_page_result(self, mock_request_html):
+    def test_category_content_prefers_vodshow_page_result(self, mock_request_html):
         mock_request_html.return_value = """
         <a class="module-poster-item module-item" href="/vod/456.html">
           <div class="module-poster-item-title">分类影片</div>
         </a>
         """
         result = self.spider.categoryContent("juji", "2", False, {})
-        self.assertEqual(mock_request_html.call_args.args[0], "https://www.jqqzx.cc/type/juji/page/2.html")
+        self.assertEqual(mock_request_html.call_args.args[0], "https://www.jqqzx.cc/vodshow/id/juji/page/2.html")
         self.assertEqual(result["page"], 2)
         self.assertNotIn("pagecount", result)
         self.assertEqual(result["list"][0]["vod_id"], "vod/456")
+
+    @patch.object(Spider, "_request_html")
+    def test_category_content_falls_back_to_type_and_stops_retrying_vodshow(self, mock_request_html):
+        mock_request_html.side_effect = [
+            "<title>系统安全验证</title>",
+            """
+            <a class="module-poster-item module-item" href="/vod/456.html">
+              <div class="module-poster-item-title">分类影片</div>
+            </a>
+            """,
+            """
+            <a class="module-poster-item module-item" href="/vod/789.html">
+              <div class="module-poster-item-title">后续分类影片</div>
+            </a>
+            """,
+        ]
+
+        first_result = self.spider.categoryContent("juji", "2", False, {})
+        second_result = self.spider.categoryContent("juji", "3", False, {})
+
+        self.assertEqual(
+            mock_request_html.call_args_list,
+            [
+                call("https://www.jqqzx.cc/vodshow/id/juji/page/2.html"),
+                call("https://www.jqqzx.cc/type/juji/page/2.html"),
+                call("https://www.jqqzx.cc/type/juji/page/3.html"),
+            ],
+        )
+        self.assertEqual(first_result["list"][0]["vod_id"], "vod/456")
+        self.assertEqual(second_result["list"][0]["vod_id"], "vod/789")
 
     @patch.object(Spider, "_request_html")
     def test_search_content_uses_suggest_api(self, mock_request_html):
