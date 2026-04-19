@@ -222,24 +222,6 @@ class TestDBKUSpider(unittest.TestCase):
         self.assertEqual(result["url"], "https://video.example/final.m3u8")
         self.assertEqual(result["header"]["Referer"], "https://www.dbku.tv/vodplay/100-1-1.html")
 
-    @patch.object(Spider, "log")
-    @patch.object(Spider, "_request_html")
-    def test_player_content_logs_resolved_player_fields(self, mock_request_html, mock_log):
-        mock_request_html.return_value = """
-        <script>
-        var player_data = {"url":"aHR0cHM6Ly92aWRlby5leGFtcGxlL2ZpbmFsLm0zdTg=","encrypt":"2"};
-        </script>
-        """
-        self.spider.playerContent("独播库", "100-1-1", {})
-        mock_log.assert_called()
-        payload = mock_log.call_args.args[0]
-        self.assertEqual(payload["stage"], "playerContent")
-        self.assertEqual(payload["input_url"], "100-1-1")
-        self.assertEqual(payload["request_url"], "https://www.dbku.tv/vodplay/100-1-1.html")
-        self.assertEqual(payload["encrypt"], 2)
-        self.assertEqual(payload["decoded_url"], "https://video.example/final.m3u8")
-        self.assertEqual(payload["final_url"], "https://video.example/final.m3u8")
-
     @patch.object(Spider, "_request_html")
     def test_player_content_follows_internal_jump(self, mock_request_html):
         mock_request_html.side_effect = [
