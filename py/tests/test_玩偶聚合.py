@@ -28,6 +28,23 @@ class TestWanouAggregateSpider(unittest.TestCase):
         self.assertEqual(content["filters"]["site_wanou"][0]["key"], "categoryId")
         self.assertEqual(content["filters"]["site_wanou"][0]["value"][1], {"n": "电影", "v": "1"})
 
+    def test_home_content_exposes_zhizhen_site_and_categories(self):
+        content = self.spider.homeContent(False)
+        type_ids = [item["type_id"] for item in content["class"]]
+        self.assertIn("site_zhizhen", type_ids)
+        self.assertEqual(
+            content["filters"]["site_zhizhen"][0]["value"][1:],
+            [
+                {"n": "电影", "v": "1"},
+                {"n": "剧集", "v": "2"},
+                {"n": "动漫", "v": "3"},
+                {"n": "综艺", "v": "4"},
+                {"n": "短剧", "v": "5"},
+                {"n": "老剧", "v": "24"},
+                {"n": "严选", "v": "26"},
+            ],
+        )
+
     @patch.object(
         Spider,
         "_load_local_filter_groups",
@@ -328,6 +345,33 @@ class TestWanouAggregateSpider(unittest.TestCase):
         self.assertEqual(results[0]["vod_id"], "site:wanou:/voddetail/789.html")
         self.assertEqual(results[0]["vod_name"], "搜索影片")
 
+    @patch.object(Spider, "_request_with_failover")
+    def test_fetch_site_search_builds_zhizhen_search_url_and_parses_results(self, mock_request_with_failover):
+        mock_request_with_failover.return_value = """
+        <div class="module-search-item">
+          <a class="video-serial" href="/index.php/vod/detail/id/789.html" title="至臻影片">抢先版</a>
+          <div class="module-item-pic"><img data-src="/search.jpg" alt="至臻影片" /></div>
+        </div>
+        """
+        site = self.spider._get_site("zhizhen")
+        results = self.spider._fetch_site_search(site, "繁花", 1)
+        self.assertEqual(
+            mock_request_with_failover.call_args.args[1],
+            "/index.php/vod/search/page/1/wd/%E7%B9%81%E8%8A%B1.html",
+        )
+        self.assertEqual(
+            results[0],
+            {
+                "vod_id": "site:zhizhen:/index.php/vod/detail/id/789.html",
+                "vod_name": "至臻影片",
+                "vod_pic": "http://www.miqk.cc/search.jpg",
+                "vod_remarks": "",
+                "vod_year": "",
+                "_site": "zhizhen",
+                "_detail_path": "/index.php/vod/detail/id/789.html",
+            },
+        )
+
     @patch.object(Spider, "_fetch_site_search")
     def test_search_content_skips_site_errors(self, mock_fetch_site_search):
         mock_fetch_site_search.side_effect = [
@@ -355,3 +399,58 @@ class TestWanouAggregateSpider(unittest.TestCase):
 
     def test_search_content_returns_empty_list_for_blank_keyword(self):
         self.assertEqual(self.spider.searchContent("", False, "1"), {"page": 1, "total": 0, "list": []})
+
+    @patch.object(Spider, "_fetch_site_detail")
+    def test_detail_content_for_aggregate_id_merges_zhizhen_pan_lines(self, mock_fetch_site_detail):
+        mock_fetch_site_detail.side_effect = [
+            {
+                "vod_name": "繁花",
+                "vod_pic": "https://img.example/w.jpg",
+                "vod_year": "2024",
+                "vod_director": "导演甲",
+                "vod_actor": "演员甲",
+                "vod_content": "玩偶简介",
+                "pan_urls": ["https://pan.baidu.com/s/b1"],
+                "_site_name": "玩偶",
+            },
+            {
+                "vod_name": "繁花",
+                "vod_pic": "http://www.miqk.cc/poster.jpg",
+                "vod_year": "2024",
+                "vod_director": "导演乙",
+                "vod_actor": "演员乙",
+                "vod_content": "至臻简介",
+                "pan_urls": ["https://pan.quark.cn/s/z1", "https://pan.baidu.com/s/b1"],
+                "_site_name": "至臻",
+            },
+        ]
+        payload = [
+            {"site": "wanou", "path": "/voddetail/1.html", "name": "繁花", "year": "2024"},
+            {"site": "zhizhen", "path": "/index.php/vod/detail/id/2.html", "name": "繁花", "year": "2024"},
+        ]
+        result = self.spider.detailContent([self.spider._encode_aggregate_vod_id(payload)])
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_name"], "繁花")
+        self.assertEqual(vod["vod_play_from"], "baidu#玩偶$$$quark#至臻")
+        self.assertEqual(
+            vod["vod_play_url"],
+            "百度资源$https://pan.baidu.com/s/b1$$$夸克资源$https://pan.quark.cn/s/z1",
+        )
+
+    @patch.object(Spider, "_request_with_failover")
+    def test_category_content_builds_zhizhen_category_url(self, mock_request_with_failover):
+        mock_request_with_failover.return_value = """
+        <div class="module-item">
+          <div class="module-item-pic">
+            <a href="/index.php/vod/detail/id/456.html"></a>
+            <img data-src="/cate.jpg" alt="至臻分类片" />
+          </div>
+          <div class="module-item-text">HD</div>
+        </div>
+        """
+        result = self.spider.categoryContent("site_zhizhen", "2", False, {"categoryId": "24"})
+        self.assertEqual(
+            mock_request_with_failover.call_args.args[1],
+            "http://www.miqk.cc/index.php/vod/show/id/24/page/2.html",
+        )
+        self.assertEqual(result["list"][0]["vod_id"], "site:zhizhen:/index.php/vod/detail/id/456.html")

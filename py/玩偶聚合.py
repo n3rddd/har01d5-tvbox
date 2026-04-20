@@ -82,6 +82,26 @@ class Spider(BaseSpider):
                 "search_url": "/vodsearch/-------------.html?wd={keyword}&page={page}",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("4", "综艺")],
             },
+            {
+                "id": "zhizhen",
+                "name": "至臻",
+                "domains": ["http://www.miqk.cc"],
+                "filter_files": [],
+                "list_xpath": "//*[contains(@class,'module-item')]",
+                "search_xpath": "//*[contains(@class,'module-search-item')]",
+                "detail_pan_xpath": "//*[contains(@class,'module-row-info')]//p",
+                "category_url": "/index.php/vod/show/id/{categoryId}/page/{page}.html",
+                "search_url": "/index.php/vod/search/page/{page}/wd/{keyword}.html",
+                "default_categories": [
+                    ("1", "电影"),
+                    ("2", "剧集"),
+                    ("3", "动漫"),
+                    ("4", "综艺"),
+                    ("5", "短剧"),
+                    ("24", "老剧"),
+                    ("26", "严选"),
+                ],
+            },
         ]
 
     def init(self, extend=""):
