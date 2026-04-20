@@ -70,6 +70,15 @@ class Spider(BaseSpider):
     def _clean_text(self, text):
         return re.sub(r"\s+", " ", str(text or "").replace("\xa0", " ")).strip()
 
+    def _normalize_img_url(self, img_url):
+        raw = str(img_url or "").strip()
+        if not raw:
+            return ""
+        matches = list(re.finditer(r"https?://", raw, re.I))
+        if len(matches) > 1:
+            raw = raw[matches[-1].start() :]
+        return raw
+
     def _detect_pan_type(self, url):
         raw = str(url or "").strip()
         for pan_type, title, pattern in self.pan_patterns:
@@ -113,7 +122,7 @@ class Spider(BaseSpider):
                 {
                     "vod_id": href,
                     "vod_name": title,
-                    "vod_pic": self._build_url(pic),
+                    "vod_pic": self._build_url(self._normalize_img_url(pic)),
                     "vod_remarks": remarks,
                     "vod_year": year,
                 }
@@ -153,7 +162,7 @@ class Spider(BaseSpider):
                 {
                     "vod_id": href,
                     "vod_name": title,
-                    "vod_pic": self._build_url(pic),
+                    "vod_pic": self._build_url(self._normalize_img_url(pic)),
                     "vod_remarks": remarks,
                 }
             )
@@ -177,12 +186,14 @@ class Spider(BaseSpider):
             "vod_id": vod_id,
             "vod_name": self._clean_text("".join(root.xpath("//*[contains(@class,'page-title')][1]//text()"))),
             "vod_pic": self._build_url(
-                "".join(
-                    root.xpath(
-                        "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@data-src | "
-                        "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@src"
-                    )
-                ).strip()
+                self._normalize_img_url(
+                    "".join(
+                        root.xpath(
+                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@data-src | "
+                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@src"
+                        )
+                    ).strip()
+                )
             ),
             "vod_year": "",
             "vod_director": "",

@@ -111,6 +111,35 @@ class TestZhiZhenSpider(unittest.TestCase):
             ],
         )
 
+    def test_parse_cards_normalizes_nested_absolute_cover_url(self):
+        html = """
+        <div id="main">
+          <div class="module-item">
+            <div class="module-item-pic">
+              <a href="/index.php/vod/detail/id/123.html"></a>
+              <img
+                data-src="https://pic1.imgyzzy.com/https://img.ffzy888.com/https://img.ffzy888.com/upload/vod/2024-06-13/17182715511.jpg"
+                alt="嵌套封面"
+              />
+            </div>
+            <div class="module-item-text">HD</div>
+            <div class="module-item-caption"><span>2024</span></div>
+          </div>
+        </div>
+        """
+        self.assertEqual(
+            self.spider._parse_cards(html),
+            [
+                {
+                    "vod_id": "/index.php/vod/detail/id/123.html",
+                    "vod_name": "嵌套封面",
+                    "vod_pic": "https://img.ffzy888.com/upload/vod/2024-06-13/17182715511.jpg",
+                    "vod_remarks": "HD",
+                    "vod_year": "2024",
+                }
+            ],
+        )
+
     @patch.object(Spider, "_request_html")
     def test_category_content_builds_reference_url_and_returns_page_payload(self, mock_request_html):
         mock_request_html.return_value = """
