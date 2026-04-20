@@ -86,3 +86,81 @@ class Spider(BaseSpider):
         except Exception as e:
             self.log(f"JSON解析失败: {e}")
             return None
+
+    CATEGORY_BLOCKED = ["全部"]
+    CATEGORY_FORCE_ORDER = ["电影", "电视剧", "综艺", "动漫", "短剧"]
+    AREA_MERGE_DISPLAY = "大陆"
+    AREA_MERGE_LIST = ["中国大陆", "大陆", "内地"]
+
+    def _process_classes(self, type_list):
+        order_map = {n: i for i, n in enumerate(self.CATEGORY_FORCE_ORDER)}
+        classes = [
+            {"type_id": t["type_id"], "type_name": t["type_name"]}
+            for t in type_list
+            if t["type_name"] not in self.CATEGORY_BLOCKED
+        ]
+        classes.sort(key=lambda c: order_map.get(c["type_name"], 999))
+        return classes
+
+    def _process_area_filter(self, area_list):
+        if not area_list:
+            return area_list
+        merge_set = set(self.AREA_MERGE_LIST)
+        filtered = [a for a in area_list if a not in merge_set]
+        has_merge = any(a in merge_set for a in area_list)
+        if has_merge:
+            try:
+                idx = filtered.index("全部")
+                filtered.insert(idx + 1, self.AREA_MERGE_DISPLAY)
+            except ValueError:
+                filtered.insert(0, self.AREA_MERGE_DISPLAY)
+        return filtered
+
+    def _convert_filters(self, type_list):
+        name_map = {"class": "类型", "area": "地区", "lang": "语言", "year": "年份", "sort": "排序"}
+        current_year = str(time.localtime().tm_year)
+        filters = {}
+        for t in type_list:
+            arr = []
+            for f in t.get("filter_type_list", []):
+                key = "by" if f["name"] == "sort" else f["name"]
+                values = list(f.get("list", []))
+                if f["name"] == "area":
+                    values = self._process_area_filter(values)
+                if f["name"] == "year" and current_year not in values:
+                    try:
+                        idx = values.index("全部")
+                        values.insert(idx + 1, current_year)
+                    except ValueError:
+                        values.insert(0, current_year)
+                arr.append({
+                    "key": key,
+                    "name": name_map.get(f["name"], f["name"]),
+                    "value": [{"n": v, "v": v} for v in values],
+                })
+            filters[t["type_id"]] = arr
+        return filters
+
+    def homeContent(self, filter):
+        self.init()
+        data = self.init_data
+        if not data:
+            return {"class": [], "filters": {}}
+        classes = self._process_classes(data.get("type_list", []))
+        filters = self._convert_filters(data.get("type_list", []))
+        return {"class": classes, "filters": filters}
+
+    def homeVideoContent(self):
+        self.init()
+        if not self.init_data:
+            return {"list": []}
+        videos = []
+        for t in self.init_data.get("type_list", []):
+            for item in t.get("recommend_list", []):
+                videos.append({
+                    "vod_id": str(item.get("vod_id", "")),
+                    "vod_name": item.get("vod_name", ""),
+                    "vod_pic": item.get("vod_pic", ""),
+                    "vod_remarks": item.get("vod_remarks", ""),
+                })
+        return {"list": videos}

@@ -53,3 +53,41 @@ class TestJingyuSpider(unittest.TestCase):
         self.spider.post = lambda url, **kwargs: FakeInitResponse()
         self.spider.init()
         self.assertEqual(self.spider.host, "http://example.com")
+
+    def test_process_classes_blocks_and_sorts(self):
+        type_list = [
+            {"type_id": "0", "type_name": "全部"},
+            {"type_id": "1", "type_name": "电影"},
+            {"type_id": "3", "type_name": "综艺"},
+            {"type_id": "2", "type_name": "电视剧"},
+            {"type_id": "4", "type_name": "动漫"},
+        ]
+        classes = self.spider._process_classes(type_list)
+        names = [c["type_name"] for c in classes]
+        self.assertNotIn("全部", names)
+        self.assertEqual(names, ["电影", "电视剧", "综艺", "动漫"])
+
+    def test_process_area_filter_merges_mainland_areas(self):
+        areas = ["全部", "中国大陆", "大陆", "内地", "美国", "日本"]
+        result = self.spider._process_area_filter(areas)
+        self.assertIn("大陆", result)
+        self.assertNotIn("中国大陆", result)
+        self.assertNotIn("内地", result)
+        self.assertIn("美国", result)
+
+    def test_convert_filters_adds_current_year(self):
+        import datetime
+        type_list = [{
+            "type_id": "1",
+            "filter_type_list": [
+                {"name": "year", "list": ["全部", "2024"]},
+                {"name": "area", "list": ["全部", "中国大陆"]},
+            ]
+        }]
+        current = str(datetime.datetime.now().year)
+        filters = self.spider._convert_filters(type_list)
+        year_values = [v["v"] for v in filters["1"][0]["value"]]
+        self.assertIn(current, year_values)
+        area_values = [v["v"] for v in filters["1"][1]["value"]]
+        self.assertIn("大陆", area_values)
+        self.assertNotIn("中国大陆", area_values)
