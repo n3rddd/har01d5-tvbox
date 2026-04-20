@@ -12,6 +12,12 @@ Spider = MODULE.Spider
 
 
 class TestHeiMaoAppSpider(unittest.TestCase):
+    def test_module_uses_crypto_aes(self):
+        source = (ROOT / "黑猫APP.py").read_text(encoding="utf-8")
+        self.assertIn("from Crypto.Cipher import AES", source)
+        self.assertIn("from Crypto.Util.Padding import pad, unpad", source)
+        self.assertNotIn("from cryptography", source)
+
     def setUp(self):
         Spider._instance = None
         self.spider = Spider()

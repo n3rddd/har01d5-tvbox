@@ -5,8 +5,8 @@ import sys
 from datetime import datetime
 from urllib.parse import unquote
 
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.padding import PKCS7
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 from base.spider import Spider as BaseSpider
 
@@ -74,19 +74,14 @@ class Spider(BaseSpider):
         return json.loads(self._aes_decrypt(body["data"]))
 
     def _aes_encrypt(self, text):
-        padder = PKCS7(128).padder()
-        data = padder.update(str(text).encode("utf-8")) + padder.finalize()
-        cipher = Cipher(algorithms.AES(self.aes_key.encode("utf-8")), modes.CBC(self.aes_iv.encode("utf-8")))
-        encryptor = cipher.encryptor()
-        return base64.b64encode(encryptor.update(data) + encryptor.finalize()).decode("utf-8")
+        cipher = AES.new(self.aes_key.encode("utf-8"), AES.MODE_CBC, self.aes_iv.encode("utf-8"))
+        data = pad(str(text).encode("utf-8"), AES.block_size)
+        return base64.b64encode(cipher.encrypt(data)).decode("utf-8")
 
     def _aes_decrypt(self, text):
         data = base64.b64decode(str(text or ""))
-        cipher = Cipher(algorithms.AES(self.aes_key.encode("utf-8")), modes.CBC(self.aes_iv.encode("utf-8")))
-        decryptor = cipher.decryptor()
-        padded = decryptor.update(data) + decryptor.finalize()
-        unpadder = PKCS7(128).unpadder()
-        return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
+        cipher = AES.new(self.aes_key.encode("utf-8"), AES.MODE_CBC, self.aes_iv.encode("utf-8"))
+        return unpad(cipher.decrypt(data), AES.block_size).decode("utf-8")
 
     def _replace_code(self, text):
         replacements = {
