@@ -3,6 +3,7 @@ import json
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -74,3 +75,76 @@ class TestWanouAggregateSpider(unittest.TestCase):
         left = {"vod_name": "繁花", "vod_year": "2024"}
         right = {"vod_name": "繁花", "vod_year": "2023"}
         self.assertFalse(self.spider._is_same_title(left, right))
+
+    def test_build_category_url_uses_selected_category_and_filters(self):
+        site = {
+            "id": "wanou",
+            "domains": ["https://www.wogg.net"],
+            "category_url": "/vodshow/{categoryId}--------{page}---.html",
+            "category_url_with_filters": "/vodshow/{categoryId}-{area}-{by}-{class}-----{page}---{year}.html",
+        }
+        url = self.spider._build_category_url(
+            site,
+            "1",
+            "2",
+            {"categoryId": "1", "area": "香港", "by": "score", "class": "动作", "year": "2025"},
+        )
+        self.assertEqual(
+            url,
+            "https://www.wogg.net/vodshow/1-%E9%A6%99%E6%B8%AF-score-%E5%8A%A8%E4%BD%9C-----2---2025.html",
+        )
+
+    @patch.object(Spider, "fetch")
+    def test_request_with_failover_tries_next_domain_when_first_fails(self, mock_fetch):
+        def fake_fetch(url, headers=None, timeout=10):
+            if url.startswith("https://bad.example"):
+                raise RuntimeError("boom")
+            return SimpleNamespace(status_code=200, text="<html><body>ok</body></html>")
+
+        mock_fetch.side_effect = fake_fetch
+        site = {"domains": ["https://bad.example", "https://good.example"]}
+        html = self.spider._request_with_failover(site, "/vodshow/1--------1---.html")
+        self.assertIn("ok", html)
+        self.assertEqual(site["domains"][0], "https://good.example")
+
+    def test_parse_cards_extracts_short_site_vod_id_title_cover_and_remarks(self):
+        site = {"id": "wanou", "domains": ["https://www.wogg.net"], "list_xpath": "//*[contains(@class,'module-item')]"}
+        html = """
+        <div class="module-item">
+          <div class="module-item-pic">
+            <a href="/voddetail/123.html"></a>
+            <img data-src="/poster.jpg" alt="示例影片" />
+          </div>
+          <div class="module-item-text">HD</div>
+        </div>
+        """
+        cards = self.spider._parse_cards(site, html)
+        self.assertEqual(
+            cards,
+            [
+                {
+                    "vod_id": "site:wanou:/voddetail/123.html",
+                    "vod_name": "示例影片",
+                    "vod_pic": "https://www.wogg.net/poster.jpg",
+                    "vod_remarks": "HD",
+                    "vod_year": "",
+                    "_site": "wanou",
+                    "_detail_path": "/voddetail/123.html",
+                }
+            ],
+        )
+
+    @patch.object(Spider, "_request_with_failover")
+    def test_category_content_uses_default_category_when_extend_missing(self, mock_request_with_failover):
+        mock_request_with_failover.return_value = """
+        <div class="module-item">
+          <div class="module-item-pic">
+            <a href="/voddetail/456.html"></a>
+            <img data-src="/cate.jpg" alt="分类影片" />
+          </div>
+          <div class="module-item-text">更新至10集</div>
+        </div>
+        """
+        result = self.spider.categoryContent("site_wanou", "2", False, {})
+        self.assertEqual(result["page"], 2)
+        self.assertEqual(result["list"][0]["vod_name"], "分类影片")

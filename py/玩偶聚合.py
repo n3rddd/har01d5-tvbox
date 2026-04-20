@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import quote
 
 from base.spider import Spider as BaseSpider
 
@@ -38,6 +39,9 @@ class Spider(BaseSpider):
                 "name": "玩偶",
                 "domains": ["https://www.wogg.net"],
                 "filter_files": ["wogg.json"],
+                "list_xpath": "//*[contains(@class,'module-item')]",
+                "category_url": "/vodshow/{categoryId}--------{page}---.html",
+                "category_url_with_filters": "/vodshow/{categoryId}-{area}-{by}-{class}-----{page}---{year}.html",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("4", "综艺")],
             },
             {
@@ -45,6 +49,8 @@ class Spider(BaseSpider):
                 "name": "木偶",
                 "domains": ["https://www.muou.site"],
                 "filter_files": ["mogg.json"],
+                "list_xpath": "//*[contains(@class,'module-item')]",
+                "category_url": "/vodshow/{categoryId}--------{page}---.html",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("29", "综艺")],
             },
             {
@@ -52,6 +58,8 @@ class Spider(BaseSpider):
                 "name": "蜡笔",
                 "domains": ["http://xiaocge.fun"],
                 "filter_files": ["labi.json"],
+                "list_xpath": "//*[contains(@class,'module-item')]",
+                "category_url": "/vodshow/{categoryId}--------{page}---.html",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("4", "综艺")],
             },
         ]
@@ -116,3 +124,100 @@ class Spider(BaseSpider):
         if left_year and right_year and left_year != right_year:
             return False
         return self._normalize_title(left.get("vod_name")) == self._normalize_title(right.get("vod_name"))
+
+    def _get_site(self, site_id):
+        for site in self.sites:
+            if site["id"] == site_id:
+                return site
+        return None
+
+    def _build_absolute_url(self, base, path):
+        raw = str(path or "").strip()
+        if not raw:
+            return ""
+        if raw.startswith(("http://", "https://")):
+            return raw
+        if raw.startswith("//"):
+            return "https:" + raw
+        return str(base).rstrip("/") + "/" + raw.lstrip("/")
+
+    def _build_category_url(self, site, category_id, pg, extend):
+        values = dict(extend or {})
+        values.setdefault("categoryId", category_id)
+        values.setdefault("area", "")
+        values.setdefault("by", values.get("sort", ""))
+        values.setdefault("class", "")
+        values.setdefault("year", "")
+        if site.get("category_url_with_filters") and any(values.get(key) for key in ("area", "by", "class", "year")):
+            path = site["category_url_with_filters"].format(
+                **{
+                    "categoryId": values["categoryId"],
+                    "area": quote(str(values["area"])),
+                    "by": quote(str(values["by"])),
+                    "class": quote(str(values["class"])),
+                    "page": int(pg),
+                    "year": quote(str(values["year"])),
+                }
+            )
+        else:
+            path = site["category_url"].format(categoryId=values["categoryId"], page=int(pg))
+        return self._build_absolute_url(site["domains"][0], path)
+
+    def _request_with_failover(self, site, path_or_url, referer=None):
+        last_error = None
+        for index, domain in enumerate(list(site["domains"])):
+            target = path_or_url if str(path_or_url).startswith("http") else self._build_absolute_url(domain, path_or_url)
+            try:
+                headers = dict(self.headers)
+                headers["Referer"] = referer or self._build_absolute_url(domain, "/")
+                response = self.fetch(target, headers=headers, timeout=10)
+                if response.status_code == 200 and response.text:
+                    if index > 0:
+                        site["domains"].insert(0, site["domains"].pop(index))
+                    return response.text
+            except Exception as exc:
+                last_error = exc
+        raise RuntimeError(str(last_error or "all domains failed"))
+
+    def _parse_cards(self, site, html):
+        root = self.html(html)
+        if root is None:
+            return []
+
+        items = []
+        seen = set()
+        for card in root.xpath(site["list_xpath"]):
+            href = ((card.xpath(".//a[@href][1]/@href") or [""])[0]).strip()
+            title = (
+                ((card.xpath(".//img[@alt][1]/@alt") or [""])[0]).strip()
+                or ((card.xpath(".//a[@title][1]/@title") or [""])[0]).strip()
+            )
+            pic = (
+                ((card.xpath(".//img[@data-src][1]/@data-src") or [""])[0]).strip()
+                or ((card.xpath(".//img[@src][1]/@src") or [""])[0]).strip()
+            )
+            remarks = "".join(card.xpath(".//*[contains(@class,'module-item-text')][1]//text()")).strip()
+            if not href or not title or href in seen:
+                continue
+            seen.add(href)
+            items.append(
+                {
+                    "vod_id": self._encode_site_vod_id(site["id"], href),
+                    "vod_name": title,
+                    "vod_pic": self._build_absolute_url(site["domains"][0], pic),
+                    "vod_remarks": remarks,
+                    "vod_year": "",
+                    "_site": site["id"],
+                    "_detail_path": href,
+                }
+            )
+        return items
+
+    def categoryContent(self, tid, pg, filter, extend):
+        site_id = str(tid).replace("site_", "", 1)
+        site = self._get_site(site_id)
+        values = extend if isinstance(extend, dict) else {}
+        category_id = values.get("categoryId") or site["default_categories"][0][0]
+        html = self._request_with_failover(site, self._build_category_url(site, category_id, pg, values))
+        items = self._parse_cards(site, html)
+        return {"list": items, "page": int(pg), "limit": len(items), "total": int(pg) * 20 + len(items)}
