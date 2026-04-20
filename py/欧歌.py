@@ -1,6 +1,7 @@
 # coding=utf-8
 import re
 import sys
+from urllib.parse import quote
 from urllib.parse import urljoin
 
 from base.spider import Spider as BaseSpider
@@ -92,3 +93,89 @@ class Spider(BaseSpider):
             if re.search(pattern, raw, re.I):
                 return pan_type, title
         return "", ""
+
+    def _fix_img_url(self, img_url):
+        raw = self._stringify(img_url).strip()
+        if not raw:
+            return ""
+        if raw.startswith(("http://", "https://")):
+            return raw
+        return self._build_url(raw)
+
+    def _build_category_url(self, tid, pg):
+        return self._build_url(f"/index.php/vod/show/id/{self._stringify(tid).strip()}/page/{int(pg)}.html")
+
+    def _build_search_url(self, key, pg):
+        return self._build_url(f"/index.php/vod/search/page/{int(pg)}/wd/{quote(self._stringify(key).strip())}.html")
+
+    def _parse_cards(self, html):
+        root = self.html(html)
+        if root is None:
+            return []
+        items = []
+        seen = set()
+        for card in root.xpath("//*[@id='main']//*[contains(@class,'module-item')]"):
+            href = ((card.xpath(".//*[contains(@class,'module-item-pic')]//a[@href][1]/@href") or [""])[0]).strip()
+            title = ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@alt][1]/@alt") or [""])[0]).strip()
+            pic = (
+                ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@data-src][1]/@data-src") or [""])[0]).strip()
+                or ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@src][1]/@src") or [""])[0]).strip()
+            )
+            remarks = self._clean_text("".join(card.xpath(".//*[contains(@class,'module-item-text')][1]//text()")))
+            if not href or not title or href in seen:
+                continue
+            seen.add(href)
+            items.append(
+                {
+                    "vod_id": href,
+                    "vod_name": title,
+                    "vod_pic": self._fix_img_url(pic),
+                    "vod_remarks": remarks,
+                }
+            )
+        return items
+
+    def _parse_search_cards(self, html):
+        root = self.html(html)
+        if root is None:
+            return []
+        items = []
+        seen = set()
+        for card in root.xpath("//*[contains(@class,'module-search-item')]"):
+            href = ((card.xpath(".//*[contains(@class,'video-serial')][1]/@href") or [""])[0]).strip()
+            title = (
+                ((card.xpath(".//*[contains(@class,'video-serial')][1]/@title") or [""])[0]).strip()
+                or ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@alt][1]/@alt") or [""])[0]).strip()
+            )
+            pic = (
+                ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@data-src][1]/@data-src") or [""])[0]).strip()
+                or ((card.xpath(".//*[contains(@class,'module-item-pic')]//img[@src][1]/@src") or [""])[0]).strip()
+            )
+            remarks = self._clean_text("".join(card.xpath(".//*[contains(@class,'video-serial')][1]//text()")))
+            if not remarks:
+                remarks = self._clean_text("".join(card.xpath(".//*[contains(@class,'module-item-text')][1]//text()")))
+            if not href or not title or href in seen:
+                continue
+            seen.add(href)
+            items.append(
+                {
+                    "vod_id": href,
+                    "vod_name": title,
+                    "vod_pic": self._fix_img_url(pic),
+                    "vod_remarks": remarks,
+                }
+            )
+        return items
+
+    def categoryContent(self, tid, pg, filter, extend):
+        page = int(pg)
+        items = self._parse_cards(self._request_html(self._build_category_url(tid, pg)))
+        return {"list": items, "page": page, "limit": len(items), "total": page * 20 + len(items)}
+
+    def searchContent(self, key, quick, pg="1"):
+        page = int(pg)
+        keyword = self._stringify(key).strip()
+        if not keyword:
+            return {"page": page, "total": 0, "list": []}
+        items = self._parse_search_cards(self._request_html(self._build_search_url(keyword, pg)))
+        return {"page": page, "total": len(items), "list": items}
