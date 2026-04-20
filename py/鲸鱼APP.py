@@ -164,3 +164,59 @@ class Spider(BaseSpider):
                     "vod_remarks": item.get("vod_remarks", ""),
                 })
         return {"list": videos}
+
+    def _merge_area_search(self, type_id, page, base_filters):
+        all_results = []
+        seen = set()
+        for area_val in self.AREA_MERGE_LIST:
+            try:
+                payload = {"type_id": type_id, "page": page, "area": area_val}
+                payload.update(base_filters)
+                res = self._api_post("typeFilterVodList", payload)
+                for item in (res or {}).get("recommend_list", []):
+                    vid = str(item.get("vod_id", ""))
+                    if vid not in seen:
+                        seen.add(vid)
+                        all_results.append({
+                            "vod_id": vid,
+                            "vod_name": item.get("vod_name", ""),
+                            "vod_pic": item.get("vod_pic", ""),
+                            "vod_remarks": item.get("vod_remarks", ""),
+                        })
+            except Exception as e:
+                self.log(f"聚合搜索地区[{area_val}]失败: {e}")
+        return all_results
+
+    def categoryContent(self, tid, pg, filter, extend):
+        self.init()
+        page = int(pg)
+        ext = extend or {}
+
+        if ext.get("area") == self.AREA_MERGE_DISPLAY:
+            base = {k: v for k, v in ext.items() if k != "area"}
+            base.setdefault("year", "全部")
+            base.setdefault("sort", "最新")
+            base.setdefault("lang", "全部")
+            base.setdefault("class", "全部")
+            merged = self._merge_area_search(tid, page, base)
+            return {"list": merged, "page": page, "limit": 90, "total": 999999}
+
+        payload = {
+            "type_id": tid,
+            "page": page,
+            "area": ext.get("area", "全部"),
+            "year": ext.get("year", "全部"),
+            "sort": ext.get("by", ext.get("sort", "最新")),
+            "lang": ext.get("lang", "全部"),
+            "class": ext.get("class", "全部"),
+        }
+        res = self._api_post("typeFilterVodList", payload)
+        items = []
+        for item in (res or {}).get("recommend_list", []):
+            items.append({
+                "vod_id": str(item.get("vod_id", "")),
+                "vod_name": item.get("vod_name", ""),
+                "vod_pic": item.get("vod_pic", ""),
+                "vod_remarks": item.get("vod_remarks", ""),
+            })
+        return {"list": items, "page": page, "limit": 90, "total": 999999}

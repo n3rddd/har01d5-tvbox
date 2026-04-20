@@ -91,3 +91,42 @@ class TestJingyuSpider(unittest.TestCase):
         area_values = [v["v"] for v in filters["1"][1]["value"]]
         self.assertIn("大陆", area_values)
         self.assertNotIn("中国大陆", area_values)
+
+    def test_category_content_posts_filter_payload(self):
+        encrypted_empty = self.spider._aes_encrypt(json.dumps({"recommend_list": []}))
+
+        class FakeRsp:
+            status_code = 200
+            encoding = "utf-8"
+            def json(self):
+                return {"data": encrypted_empty}
+
+        self.spider.post = lambda url, **kwargs: FakeRsp()
+        self.spider.host = "http://test.com"
+        self.spider.init_data = {}
+        result = self.spider.categoryContent("1", "2", False, {"area": "美国", "year": "2025"})
+        self.assertEqual(result["page"], 2)
+        self.assertNotIn("pagecount", result)
+        self.assertEqual(result["list"], [])
+
+    def test_category_content_merges_area_when_mainland_selected(self):
+        items_a = [{"vod_id": "1", "vod_name": "A", "vod_pic": "", "vod_remarks": ""}]
+        items_b = [{"vod_id": "2", "vod_name": "B", "vod_pic": "", "vod_remarks": ""},
+                    {"vod_id": "1", "vod_name": "A", "vod_pic": "", "vod_remarks": ""}]
+
+        call_idx = {"n": 0}
+
+        def fake_api_post(endpoint, payload=None):
+            call_idx["n"] += 1
+            if call_idx["n"] == 1:
+                return {"recommend_list": items_a}
+            return {"recommend_list": items_b}
+
+        self.spider._api_post = fake_api_post
+        self.spider.host = "http://test.com"
+        self.spider.init_data = {}
+        result = self.spider.categoryContent("1", "1", False, {"area": "大陆"})
+        ids = [v["vod_id"] for v in result["list"]]
+        self.assertEqual(len(ids), 2)
+        self.assertIn("1", ids)
+        self.assertIn("2", ids)
