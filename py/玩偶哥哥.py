@@ -41,6 +41,17 @@ class Spider(BaseSpider):
             ("aliyun", "阿里资源", r"aliyundrive\.com|alipan\.com"),
             ("uc", "UC资源", r"drive\.uc\.cn"),
         ]
+        self.pan_priority = {
+            "baidu": 1,
+            "a139": 2,
+            "a189": 3,
+            "a123": 4,
+            "a115": 5,
+            "quark": 6,
+            "xunlei": 7,
+            "aliyun": 8,
+            "uc": 9,
+        }
 
     def init(self, extend=""):
         return None
@@ -154,3 +165,101 @@ class Spider(BaseSpider):
                 }
             )
         return {"page": page, "total": len(items), "list": items}
+
+    def _parse_detail_page(self, vod_id, html):
+        root = self.html(html)
+        if root is None:
+            return {
+                "vod_id": vod_id,
+                "vod_name": "",
+                "vod_pic": "",
+                "vod_year": "",
+                "vod_director": "",
+                "vod_actor": "",
+                "vod_content": "",
+                "pan_urls": [],
+            }
+
+        detail = {
+            "vod_id": vod_id,
+            "vod_name": self._clean_text("".join(root.xpath("//*[contains(@class,'page-title')][1]//text()"))),
+            "vod_pic": self._build_url(
+                self._fix_img_url(
+                    "".join(
+                        root.xpath(
+                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@data-src | "
+                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@src"
+                        )
+                    ).strip()
+                )
+            ),
+            "vod_year": "",
+            "vod_director": "",
+            "vod_actor": "",
+            "vod_content": "",
+            "pan_urls": [],
+        }
+
+        for label_node in root.xpath("//*[contains(@class,'video-info-itemtitle')]"):
+            key = self._clean_text("".join(label_node.xpath(".//text()")))
+            sibling = label_node.getnext()
+            if sibling is None:
+                continue
+            values = [self._clean_text(text) for text in sibling.xpath(".//a//text()")]
+            joined = ",".join([value for value in values if value])
+            text_value = self._clean_text("".join(sibling.xpath(".//text()")))
+            if "年代" in key:
+                detail["vod_year"] = joined or text_value
+            elif "导演" in key:
+                detail["vod_director"] = joined or text_value
+            elif "主演" in key:
+                detail["vod_actor"] = joined or text_value
+            elif "剧情" in key:
+                detail["vod_content"] = text_value
+
+        pan_urls = []
+        for node in root.xpath("//*[contains(@class,'module-row-info')]//p"):
+            text = self._clean_text("".join(node.xpath(".//text()")))
+            if text:
+                pan_urls.append(text)
+        detail["pan_urls"] = pan_urls
+        return detail
+
+    def _build_pan_lines(self, detail):
+        lines = []
+        seen = set()
+        for url in detail.get("pan_urls", []):
+            pan_type, title = self._detect_pan_type(url)
+            if not pan_type or url in seen:
+                continue
+            seen.add(url)
+            lines.append((self.pan_priority.get(pan_type, 999), f"{pan_type}#玩偶哥哥", f"{title}${url}"))
+        lines.sort(key=lambda item: item[0])
+        return [(item[1], item[2]) for item in lines]
+
+    def detailContent(self, ids):
+        result = {"list": []}
+        for raw_id in ids:
+            vod_id = str(raw_id or "").strip()
+            detail = self._parse_detail_page(vod_id, self._request_html(self._build_url(vod_id)))
+            lines = self._build_pan_lines(detail)
+            result["list"].append(
+                {
+                    "vod_id": vod_id,
+                    "vod_name": detail["vod_name"],
+                    "vod_pic": detail["vod_pic"],
+                    "vod_year": detail["vod_year"],
+                    "vod_director": detail["vod_director"],
+                    "vod_actor": detail["vod_actor"],
+                    "vod_content": detail["vod_content"],
+                    "vod_play_from": "$$$".join([item[0] for item in lines]),
+                    "vod_play_url": "$$$".join([item[1] for item in lines]),
+                }
+            )
+        return result
+
+    def playerContent(self, flag, id, vipFlags):
+        pan_type, _ = self._detect_pan_type(id)
+        if pan_type:
+            return {"parse": 0, "playUrl": "", "url": id}
+        return {"parse": 0, "playUrl": "", "url": ""}

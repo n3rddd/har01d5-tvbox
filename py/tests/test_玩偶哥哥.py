@@ -124,3 +124,77 @@ class TestWanOuGeGeSpider(unittest.TestCase):
 
     def test_search_content_returns_empty_list_for_blank_keyword(self):
         self.assertEqual(self.spider.searchContent("", False, "1"), {"page": 1, "total": 0, "list": []})
+
+    def test_build_pan_lines_deduplicates_and_sorts_supported_links(self):
+        detail = {
+            "pan_urls": [
+                "https://pan.quark.cn/s/q1",
+                "https://pan.baidu.com/s/b1",
+                "https://pan.baidu.com/s/b1",
+                "https://example.com/ignored",
+            ]
+        }
+        self.assertEqual(
+            self.spider._build_pan_lines(detail),
+            [
+                ("baidu#玩偶哥哥", "百度资源$https://pan.baidu.com/s/b1"),
+                ("quark#玩偶哥哥", "夸克资源$https://pan.quark.cn/s/q1"),
+            ],
+        )
+
+    def test_parse_detail_page_extracts_meta_content_and_pan_urls(self):
+        html = """
+        <div class="page-title">示例剧</div>
+        <div class="mobile-play"><img class="lazyload" data-src="/poster.jpg" /></div>
+        <div class="video-info-itemtitle">年代</div><div><a>2024</a></div>
+        <div class="video-info-itemtitle">导演</div><div><a>导演甲</a></div>
+        <div class="video-info-itemtitle">主演</div><div><a>演员甲</a><a>演员乙</a></div>
+        <div class="video-info-itemtitle">剧情</div><div><p>一段剧情简介</p></div>
+        <div class="module-row-info">
+          <p>https://pan.quark.cn/s/q1</p>
+          <p>https://pan.baidu.com/s/b1</p>
+        </div>
+        """
+        detail = self.spider._parse_detail_page("/voddetail/123.html", html)
+        self.assertEqual(detail["vod_name"], "示例剧")
+        self.assertEqual(detail["vod_pic"], "http://wogg.xxooo.cf/poster.jpg")
+        self.assertEqual(detail["vod_year"], "2024")
+        self.assertEqual(detail["vod_director"], "导演甲")
+        self.assertEqual(detail["vod_actor"], "演员甲,演员乙")
+        self.assertEqual(detail["vod_content"], "一段剧情简介")
+        self.assertEqual(detail["pan_urls"], ["https://pan.quark.cn/s/q1", "https://pan.baidu.com/s/b1"])
+
+    @patch.object(Spider, "_request_html")
+    def test_detail_content_builds_pan_play_fields(self, mock_request_html):
+        mock_request_html.return_value = """
+        <div class="page-title">示例剧</div>
+        <div class="mobile-play"><img class="lazyload" data-src="/poster.jpg" /></div>
+        <div class="video-info-itemtitle">年代</div><div><a>2024</a></div>
+        <div class="video-info-itemtitle">导演</div><div><a>导演甲</a></div>
+        <div class="video-info-itemtitle">主演</div><div><a>演员甲</a></div>
+        <div class="video-info-itemtitle">剧情</div><div><p>一段剧情简介</p></div>
+        <div class="module-row-info">
+          <p>https://pan.quark.cn/s/q1</p>
+          <p>https://pan.baidu.com/s/b1</p>
+        </div>
+        """
+        result = self.spider.detailContent(["/voddetail/123.html"])
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_name"], "示例剧")
+        self.assertEqual(vod["vod_play_from"], "baidu#玩偶哥哥$$$quark#玩偶哥哥")
+        self.assertEqual(
+            vod["vod_play_url"],
+            "百度资源$https://pan.baidu.com/s/b1$$$夸克资源$https://pan.quark.cn/s/q1",
+        )
+
+    def test_player_content_passthroughs_supported_pan_urls(self):
+        self.assertEqual(
+            self.spider.playerContent("baidu#玩偶哥哥", "https://pan.baidu.com/s/demo", {}),
+            {"parse": 0, "playUrl": "", "url": "https://pan.baidu.com/s/demo"},
+        )
+
+    def test_player_content_rejects_non_pan_url(self):
+        self.assertEqual(
+            self.spider.playerContent("site", "/vodplay/1-1-1.html", {}),
+            {"parse": 0, "playUrl": "", "url": ""},
+        )
