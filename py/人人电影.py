@@ -129,10 +129,10 @@ class Spider(BaseSpider):
         items = []
         seen = set()
         for node in root.xpath("//*[@id='movielist']//li"):
-            href = "".join(node.xpath(".//*[contains(@class,'intro')]//h2//a[1]/@href")).strip()
+            href = self._first_xpath_result(node, ".//*[contains(@class,'intro')]//h2//a/@href")
             title = (
-                "".join(node.xpath(".//*[contains(@class,'intro')]//h2//a[1]/@title")).strip()
-                or "".join(node.xpath(".//*[contains(@class,'intro')]//h2//a[1]//text()")).strip()
+                self._first_xpath_result(node, ".//*[contains(@class,'intro')]//h2//a/@title")
+                or self._first_xpath_result(node, ".//*[contains(@class,'intro')]//h2//a//text()")
             )
             pic = (
                 self._first_xpath_result(node, ".//*[contains(@class,'pure-img')][1]/@data-original")
@@ -161,7 +161,7 @@ class Spider(BaseSpider):
         class_path = str(tid or "").lstrip("/")
         url = self._build_url(f"{class_path}_{page}.html")
         items = self._parse_cards(self._request_html(url))
-        return {"page": page, "limit": len(items), "total": page * 20 + len(items), "list": items}
+        return {"page": page, "limit": len(items), "total": page * 30 + len(items), "list": items}
 
     def searchContent(self, key, quick, pg="1"):
         page = int(pg)

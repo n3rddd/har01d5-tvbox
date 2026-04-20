@@ -105,7 +105,7 @@ class Spider(BaseSpider):
     def categoryContent(self, tid, pg, filter, extend):
         page = int(pg)
         items = self._parse_list_boxes(self._request_html(self._build_url(f"/{tid}.html?page={page}")))
-        return {"page": page, "limit": len(items) or 20, "total": page * (len(items) or 20), "list": items}
+        return {"page": page, "limit": len(items) or 20, "total": page * 30 + (len(items) or 20), "list": items}
 
     def searchContent(self, key, quick, pg="1"):
         page = int(pg)

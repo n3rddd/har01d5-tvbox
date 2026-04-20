@@ -102,6 +102,31 @@ class TestRenRenDianYingSpider(unittest.TestCase):
             ],
         )
 
+    def test_parse_cards_uses_first_intro_link_instead_of_concatenating_multiple_detail_urls(self):
+        html = """
+        <ul id="movielist">
+          <li>
+            <div class="intro">
+              <h2><a href="/movie/2025/0814/51262.html" title="第一部">第一部</a></h2>
+              <h2><a href="/movie/2026/0217/57139.html" title="第二部">第二部</a></h2>
+            </div>
+            <img class="pure-img" data-original="/poster.jpg" />
+            <div class="dou"><b>HD</b></div>
+          </li>
+        </ul>
+        """
+        self.assertEqual(
+            self.spider._parse_cards(html),
+            [
+                {
+                    "vod_id": "/movie/2025/0814/51262.html",
+                    "vod_name": "第一部",
+                    "vod_pic": "https://www.rrdynb.com/poster.jpg",
+                    "vod_remarks": "HD",
+                }
+            ],
+        )
+
     @patch.object(Spider, "_request_html")
     def test_category_content_builds_reference_url_and_page_payload(self, mock_request_html):
         mock_request_html.return_value = """
@@ -122,6 +147,22 @@ class TestRenRenDianYingSpider(unittest.TestCase):
         self.assertEqual(result["limit"], 1)
         self.assertEqual(result["list"][0]["vod_name"], "分类影片")
         self.assertNotIn("pagecount", result)
+
+    @patch.object(Spider, "_request_html")
+    def test_category_content_uses_plain_path_for_first_page(self, mock_request_html):
+        mock_request_html.return_value = """
+        <ul id="movielist">
+          <li>
+            <img class="pure-img" data-original="/page1.jpg" />
+            <div class="intro"><h2><a href="/movie/111.html" title="第一页影片">第一页影片</a></h2></div>
+            <div class="dou"><b>HD</b></div>
+          </li>
+        </ul>
+        """
+        result = self.spider.categoryContent("movie/list_2", "1", False, {})
+        self.assertEqual(mock_request_html.call_args.args[0], "https://www.rrdynb.com/movie/list_2.html")
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["list"][0]["vod_id"], "/movie/111.html")
 
     @patch.object(Spider, "_request_html")
     def test_search_content_builds_reference_url_and_cleans_highlight_title(self, mock_request_html):
