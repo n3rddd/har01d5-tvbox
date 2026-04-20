@@ -148,3 +148,83 @@ class TestWanouAggregateSpider(unittest.TestCase):
         result = self.spider.categoryContent("site_wanou", "2", False, {})
         self.assertEqual(result["page"], 2)
         self.assertEqual(result["list"][0]["vod_name"], "分类影片")
+
+    def test_aggregate_search_results_merges_same_title_and_keeps_highest_priority_source(self):
+        raw_results = [
+            {
+                "vod_id": "site:muou:/voddetail/2.html",
+                "vod_name": "繁花",
+                "vod_pic": "https://img.example/m.jpg",
+                "vod_remarks": "木偶版",
+                "vod_year": "2024",
+                "_site": "muou",
+                "_detail_path": "/voddetail/2.html",
+            },
+            {
+                "vod_id": "site:wanou:/voddetail/1.html",
+                "vod_name": "繁花",
+                "vod_pic": "https://img.example/w.jpg",
+                "vod_remarks": "玩偶版",
+                "vod_year": "2024",
+                "_site": "wanou",
+                "_detail_path": "/voddetail/1.html",
+            },
+        ]
+        aggregated = self.spider._aggregate_search_results(raw_results)
+        self.assertEqual(len(aggregated), 1)
+        self.assertEqual(aggregated[0]["vod_name"], "繁花")
+        self.assertEqual(aggregated[0]["vod_pic"], "https://img.example/w.jpg")
+        self.assertEqual(aggregated[0]["vod_remarks"], "玩偶版")
+        self.assertTrue(aggregated[0]["vod_id"].startswith("agg:"))
+
+    def test_aggregate_search_results_keeps_year_conflict_as_two_items(self):
+        raw_results = [
+            {
+                "vod_id": "site:wanou:/voddetail/1.html",
+                "vod_name": "倚天屠龙记",
+                "vod_year": "2019",
+                "_site": "wanou",
+                "_detail_path": "/voddetail/1.html",
+            },
+            {
+                "vod_id": "site:muou:/voddetail/2.html",
+                "vod_name": "倚天屠龙记",
+                "vod_year": "2022",
+                "_site": "muou",
+                "_detail_path": "/voddetail/2.html",
+            },
+        ]
+        aggregated = self.spider._aggregate_search_results(raw_results)
+        self.assertEqual(len(aggregated), 2)
+
+    @patch.object(Spider, "_fetch_site_search")
+    def test_search_content_queries_sites_and_returns_aggregated_items(self, mock_fetch_site_search):
+        mock_fetch_site_search.side_effect = [
+            [
+                {
+                    "vod_id": "site:wanou:/voddetail/1.html",
+                    "vod_name": "繁花",
+                    "vod_pic": "https://img.example/w.jpg",
+                    "vod_remarks": "玩偶版",
+                    "vod_year": "2024",
+                    "_site": "wanou",
+                    "_detail_path": "/voddetail/1.html",
+                }
+            ],
+            [
+                {
+                    "vod_id": "site:muou:/voddetail/2.html",
+                    "vod_name": "繁花",
+                    "vod_pic": "https://img.example/m.jpg",
+                    "vod_remarks": "木偶版",
+                    "vod_year": "2024",
+                    "_site": "muou",
+                    "_detail_path": "/voddetail/2.html",
+                }
+            ],
+            [],
+        ]
+        result = self.spider.searchContent("繁花", False, "1")
+        self.assertEqual(len(result["list"]), 1)
+        self.assertEqual(result["list"][0]["vod_name"], "繁花")
+        self.assertNotIn("pagecount", result)

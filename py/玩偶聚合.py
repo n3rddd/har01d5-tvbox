@@ -40,8 +40,10 @@ class Spider(BaseSpider):
                 "domains": ["https://www.wogg.net"],
                 "filter_files": ["wogg.json"],
                 "list_xpath": "//*[contains(@class,'module-item')]",
+                "search_xpath": "//*[contains(@class,'module-search-item')]",
                 "category_url": "/vodshow/{categoryId}--------{page}---.html",
                 "category_url_with_filters": "/vodshow/{categoryId}-{area}-{by}-{class}-----{page}---{year}.html",
+                "search_url": "/vodsearch/-------------.html?wd={keyword}&page={page}",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("4", "综艺")],
             },
             {
@@ -50,7 +52,9 @@ class Spider(BaseSpider):
                 "domains": ["https://www.muou.site"],
                 "filter_files": ["mogg.json"],
                 "list_xpath": "//*[contains(@class,'module-item')]",
+                "search_xpath": "//*[contains(@class,'module-search-item')]",
                 "category_url": "/vodshow/{categoryId}--------{page}---.html",
+                "search_url": "/vodsearch/-------------.html?wd={keyword}&page={page}",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("29", "综艺")],
             },
             {
@@ -59,7 +63,9 @@ class Spider(BaseSpider):
                 "domains": ["http://xiaocge.fun"],
                 "filter_files": ["labi.json"],
                 "list_xpath": "//*[contains(@class,'module-item')]",
+                "search_xpath": "//*[contains(@class,'module-search-item')]",
                 "category_url": "/vodshow/{categoryId}--------{page}---.html",
+                "search_url": "/vodsearch/-------------.html?wd={keyword}&page={page}",
                 "default_categories": [("1", "电影"), ("2", "电视剧"), ("3", "动漫"), ("4", "综艺")],
             },
         ]
@@ -221,3 +227,106 @@ class Spider(BaseSpider):
         html = self._request_with_failover(site, self._build_category_url(site, category_id, pg, values))
         items = self._parse_cards(site, html)
         return {"list": items, "page": int(pg), "limit": len(items), "total": int(pg) * 20 + len(items)}
+
+    def _site_rank(self, site_id):
+        try:
+            return self.site_priority.index(site_id)
+        except ValueError:
+            return 999
+
+    def _parse_search_cards(self, site, html):
+        root = self.html(html)
+        if root is None:
+            return []
+
+        items = []
+        seen = set()
+        xpath = site.get("search_xpath") or site["list_xpath"]
+        for card in root.xpath(xpath):
+            href = (
+                ((card.xpath(".//*[contains(@class,'video-serial')][1]/@href") or [""])[0]).strip()
+                or ((card.xpath(".//*[@href][1]/@href") or [""])[0]).strip()
+            )
+            title = (
+                ((card.xpath(".//*[contains(@class,'video-serial')][1]/@title") or [""])[0]).strip()
+                or ((card.xpath(".//img[@alt][1]/@alt") or [""])[0]).strip()
+                or ((card.xpath(".//*[@title][1]/@title") or [""])[0]).strip()
+            )
+            pic = (
+                ((card.xpath(".//img[@data-src][1]/@data-src") or [""])[0]).strip()
+                or ((card.xpath(".//img[@src][1]/@src") or [""])[0]).strip()
+            )
+            remarks = "".join(card.xpath(".//*[contains(@class,'module-item-text')][1]//text()")).strip()
+            if not href or not title or href in seen:
+                continue
+            seen.add(href)
+            items.append(
+                {
+                    "vod_id": self._encode_site_vod_id(site["id"], href),
+                    "vod_name": title,
+                    "vod_pic": self._build_absolute_url(site["domains"][0], pic),
+                    "vod_remarks": remarks,
+                    "vod_year": "",
+                    "_site": site["id"],
+                    "_detail_path": href,
+                }
+            )
+        return items
+
+    def _fetch_site_search(self, site, keyword, pg):
+        search_path = site["search_url"].format(keyword=quote(str(keyword)), page=int(pg))
+        html = self._request_with_failover(site, search_path)
+        return self._parse_search_cards(site, html)
+
+    def _aggregate_search_results(self, items):
+        groups = []
+        for item in items:
+            matched_group = None
+            for group in groups:
+                if self._is_same_title(group[0], item):
+                    matched_group = group
+                    break
+            if matched_group is None:
+                groups.append([item])
+            else:
+                matched_group.append(item)
+
+        result = []
+        for group in groups:
+            group.sort(key=lambda item: self._site_rank(item["_site"]))
+            primary = group[0]
+            payload = [
+                {
+                    "site": item["_site"],
+                    "path": item["_detail_path"],
+                    "name": item.get("vod_name", ""),
+                    "year": item.get("vod_year", ""),
+                }
+                for item in group
+            ]
+            result.append(
+                {
+                    "vod_id": self._encode_aggregate_vod_id(payload),
+                    "vod_name": primary["vod_name"],
+                    "vod_pic": primary.get("vod_pic", ""),
+                    "vod_remarks": primary.get("vod_remarks", ""),
+                    "vod_year": primary.get("vod_year", ""),
+                }
+            )
+        return result
+
+    def searchContent(self, key, quick, pg="1"):
+        page = int(pg)
+        keyword = str(key or "").strip()
+        if not keyword:
+            return {"page": page, "total": 0, "list": []}
+
+        all_items = []
+        for site in self.sites:
+            try:
+                all_items.extend(self._fetch_site_search(site, keyword, page))
+            except Exception:
+                continue
+
+        merged = self._aggregate_search_results(all_items)
+        return {"page": page, "total": len(merged), "list": merged}
