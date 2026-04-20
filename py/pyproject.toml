@@ -1,0 +1,13 @@
+[project]
+name = "py"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.4",
+    "pycryptodome>=3.23.0",
+    "pyquery>=2.0.1",
+    "requests>=2.33.1",
+]
