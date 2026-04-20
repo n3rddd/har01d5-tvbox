@@ -164,6 +164,49 @@ class TestZXZJSpider(unittest.TestCase):
         )
         self.assertEqual(groups, [])
 
+    def test_decrypt_url_round_trip_with_fixture(self):
+        self.assertEqual(
+            self.spider._decrypt_url("d6f636e256c607d6168756e2f67464544434241456469667f2f2a33707474786"),
+            "https://video.example.com",
+        )
+
+    def test_extract_iframe_url_reads_jx_target(self):
+        html = '<script>var player_data = {"url":"https://jx.zxzj.example/player?id=1"};</script>'
+        self.assertEqual(
+            self.spider._extract_iframe_url(html),
+            "https://jx.zxzj.example/player?id=1",
+        )
+
+    @patch.object(Spider, "_request_html")
+    def test_player_content_returns_decoded_direct_url_for_zxzj(self, mock_request_html):
+        mock_request_html.side_effect = [
+            '<script>var player_data = {"url":"https://jx.zxzj.example/player?id=1"};</script>',
+            '<script>var result_v2 = {"data":"d6f636e256c607d6168756e2f67464544434241456469667f2f2a33707474786"};</script>',
+        ]
+        result = self.spider.playerContent("zxzj", "vodplay/999-1-1.html", {})
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["jx"], 0)
+        self.assertEqual(result["url"], "https://video.example.com")
+        self.assertEqual(result["header"]["Referer"], "https://jx.zxzj.example/player?id=1")
+
+    @patch.object(Spider, "_request_html")
+    def test_player_content_falls_back_to_play_page_when_decrypt_fails(self, mock_request_html):
+        mock_request_html.side_effect = [
+            '<script>var player_data = {"url":"https://jx.zxzj.example/player?id=1"};</script>',
+            '<script>var result_v2 = {"data":"broken"};</script>',
+        ]
+        result = self.spider.playerContent("zxzj", "vodplay/999-1-1.html", {})
+        self.assertEqual(result["parse"], 1)
+        self.assertEqual(result["jx"], 1)
+        self.assertEqual(result["url"], "https://www.zxzjhd.com/vodplay/999-1-1.html")
+
+    def test_player_content_returns_direct_netdisk_link(self):
+        result = self.spider.playerContent("quark", "https://pan.quark.cn/s/demo", {})
+        self.assertEqual(
+            result,
+            {"parse": 0, "jx": 0, "playUrl": "", "url": "https://pan.quark.cn/s/demo", "header": {}},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

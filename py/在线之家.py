@@ -379,3 +379,68 @@ class Spider(BaseSpider):
             "vod_play_url": "$$$".join(play_url),
         }
         return {"list": [vod]}
+
+    def _decrypt_url(self, encrypted_data):
+        raw = str(encrypted_data or "").strip()
+        if not raw or len(raw) % 2 != 0:
+            return ""
+        try:
+            reversed_hex = raw[::-1]
+            decoded = []
+            for index in range(0, len(reversed_hex), 2):
+                decoded.append(chr(int(reversed_hex[index : index + 2], 16)))
+            text = "".join(decoded)
+            split_len = max((len(text) - 7) // 2, 0)
+            candidate = text[:split_len] + text[split_len + 7 :]
+            return candidate if candidate.startswith("http") else ""
+        except Exception:
+            return ""
+
+    def _extract_iframe_url(self, html):
+        matched = re.search(r'"url"\s*:\s*"(https:[^"]*?jx\.zxzj[^"]*?)"', str(html or ""))
+        if matched:
+            return matched.group(1).replace("\\/", "/")
+        matched = re.search(r"player_[a-z0-9_]+\s*=\s*(\{[\s\S]*?\})\s*;?", str(html or ""), re.I)
+        if not matched:
+            return ""
+        try:
+            payload = json.loads(matched.group(1))
+        except Exception:
+            return ""
+        value = str(payload.get("url") or "").replace("\\/", "/")
+        return value if "jx.zxzj" in value else ""
+
+    def _extract_result_v2_data(self, html):
+        matched = re.search(r"result_v2\s*=\s*(\{[\s\S]*?\})\s*;", str(html or ""))
+        if not matched:
+            return ""
+        try:
+            payload = json.loads(matched.group(1))
+        except Exception:
+            return ""
+        return str(payload.get("data") or payload.get("url") or "").strip()
+
+    def playerContent(self, flag, id, vipFlags):
+        raw_flag = str(flag or "").lower()
+        raw_id = str(id or "").strip()
+        if raw_flag in ("baidu", "quark", "uc", "aliyun", "xunlei"):
+            return {"parse": 0, "jx": 0, "playUrl": "", "url": raw_id, "header": {}}
+
+        play_url = raw_id if raw_id.startswith("http") else self._build_url("/" + raw_id.lstrip("/"))
+        play_html = self._request_html(play_url, referer=self.headers["Referer"])
+        iframe_url = self._extract_iframe_url(play_html)
+        if not iframe_url:
+            return {"parse": 1, "jx": 1, "playUrl": "", "url": play_url, "header": self.headers}
+
+        iframe_html = self._request_html(iframe_url, referer=play_url)
+        encrypted = self._extract_result_v2_data(iframe_html)
+        final_url = self._decrypt_url(encrypted)
+        if not final_url:
+            return {"parse": 1, "jx": 1, "playUrl": "", "url": play_url, "header": self.headers}
+        return {
+            "parse": 0,
+            "jx": 0,
+            "playUrl": "",
+            "url": final_url,
+            "header": {"Referer": iframe_url, "User-Agent": self.headers["User-Agent"]},
+        }
