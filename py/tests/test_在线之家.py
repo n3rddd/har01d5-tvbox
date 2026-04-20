@@ -207,6 +207,17 @@ class TestZXZJSpider(unittest.TestCase):
             {"parse": 0, "jx": 0, "playUrl": "", "url": "https://pan.quark.cn/s/demo", "header": {}},
         )
 
+    def test_home_content_keeps_reference_filter_values_for_movie_and_anime(self):
+        filters = self.spider.homeContent(False)["filters"]
+        movie_filters = filters["1"]
+        anime_filters = filters["6"]
+        self.assertIn({"n": "喜剧", "v": "喜剧"}, movie_filters[0]["value"])
+        self.assertIn({"n": "欧美", "v": "欧美"}, movie_filters[1]["value"])
+        self.assertIn({"n": "2025", "v": "2025"}, movie_filters[2]["value"])
+        self.assertEqual(movie_filters[3]["value"][1], {"n": "人气", "v": "hits"})
+        self.assertIn({"n": "国产", "v": "国产"}, anime_filters[1]["value"])
+        self.assertIn({"n": "热血", "v": "热血"}, anime_filters[0]["value"])
+
 
 if __name__ == "__main__":
     unittest.main()
