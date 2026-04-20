@@ -22,7 +22,7 @@ class TestWanouAggregateSpider(unittest.TestCase):
         content = self.spider.homeContent(False)
         self.assertEqual(
             [item["type_id"] for item in content["class"][:3]],
-            ["site_wanou", "site_muou", "site_labi"],
+            ["site_wanou", "site_zhizhen", "site_shandian"],
         )
         self.assertEqual(content["class"][0]["type_name"], "玩偶")
         self.assertEqual(content["filters"]["site_wanou"][0]["key"], "categoryId")
