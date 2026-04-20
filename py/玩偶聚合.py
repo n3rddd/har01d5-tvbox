@@ -48,7 +48,7 @@ class Spider(BaseSpider):
             {
                 "id": "wanou",
                 "name": "玩偶",
-                "domains": ["https://www.wogg.net"],
+                "domains": ["https://wogg.xxooo.cf"],
                 "filter_files": ["wogg.json"],
                 "list_xpath": "//*[contains(@class,'module-item')]",
                 "search_xpath": "//*[contains(@class,'module-search-item')]",
@@ -61,7 +61,7 @@ class Spider(BaseSpider):
             {
                 "id": "muou",
                 "name": "木偶",
-                "domains": ["https://www.muou.site"],
+                "domains": ["https://www.muou.site", "http://123.666291.xyz"],
                 "filter_files": ["mogg.json"],
                 "list_xpath": "//*[contains(@class,'module-item')]",
                 "search_xpath": "//*[contains(@class,'module-search-item')]",
