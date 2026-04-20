@@ -102,6 +102,24 @@ class Spider(BaseSpider):
                     ("26", "严选"),
                 ],
             },
+            {
+                "id": "shandian",
+                "name": "闪电",
+                "domains": ["https://sd.sduc.site"],
+                "filter_files": [],
+                "list_xpath": "//*[contains(@class,'module-item')]",
+                "search_xpath": "//*[contains(@class,'module-search-item')]",
+                "detail_pan_xpath": "//*[contains(@class,'module-row-info')]//p",
+                "category_url": "/index.php/vod/show/id/{categoryId}/page/{page}.html",
+                "search_url": "/index.php/vod/search/page/{page}/wd/{keyword}.html",
+                "default_categories": [
+                    ("1", "电影"),
+                    ("2", "剧集"),
+                    ("3", "综艺"),
+                    ("4", "动漫"),
+                    ("30", "短剧"),
+                ],
+            },
         ]
 
     def init(self, extend=""):
