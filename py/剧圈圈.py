@@ -148,7 +148,7 @@ class Spider(BaseSpider):
             items = self._parse_cards(self._request_html(self._build_type_category_url(tid, page)))
         return {
             "page": page,
-            "total": page * 30 + len(items),
+            "total": len(items),
             "list": items,
         }
 
