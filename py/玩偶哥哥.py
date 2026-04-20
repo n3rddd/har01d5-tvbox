@@ -1,7 +1,7 @@
 # coding=utf-8
 import re
 import sys
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from base.spider import Spider as BaseSpider
 
@@ -73,3 +73,84 @@ class Spider(BaseSpider):
             if re.search(pattern, raw, re.I):
                 return pan_type, title
         return "", ""
+
+    def _clean_text(self, text):
+        return re.sub(r"\s+", " ", str(text or "").replace("\xa0", " ")).strip()
+
+    def _request_html(self, path_or_url):
+        target = path_or_url if str(path_or_url).startswith("http") else self._build_url(path_or_url)
+        response = self.fetch(target, headers=dict(self.headers), timeout=10)
+        if response.status_code != 200:
+            return ""
+        return response.text or ""
+
+    def _page_result(self, items, pg):
+        page = int(pg)
+        return {"page": page, "limit": len(items), "total": page * 20 + len(items), "list": items}
+
+    def _parse_cards(self, html):
+        root = self.html(html)
+        if root is None:
+            return []
+
+        items = []
+        seen = set()
+        for node in root.xpath("//*[@id='main']//*[contains(@class,'module-item')]"):
+            href = "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//a[1]/@href")).strip()
+            title = "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//img[1]/@alt")).strip()
+            pic = (
+                "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//img[1]/@data-src")).strip()
+                or "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//img[1]/@src")).strip()
+            )
+            remarks = self._clean_text("".join(node.xpath(".//*[contains(@class,'module-item-text')][1]//text()")))
+            if not href or not title or href in seen:
+                continue
+            seen.add(href)
+            items.append(
+                {
+                    "vod_id": href,
+                    "vod_name": title,
+                    "vod_pic": self._build_url(self._fix_img_url(pic)),
+                    "vod_remarks": remarks,
+                }
+            )
+        return items
+
+    def categoryContent(self, tid, pg, filter, extend):
+        url = self._build_url(f"/vodshow/{tid}--------{int(pg)}---.html")
+        return self._page_result(self._parse_cards(self._request_html(url)), pg)
+
+    def searchContent(self, key, quick, pg="1"):
+        keyword = self._clean_text(key)
+        page = int(pg)
+        if not keyword:
+            return {"page": page, "total": 0, "list": []}
+
+        url = self._build_url(f"/vodsearch/-------------.html?wd={quote(keyword)}&page={page}")
+        root = self.html(self._request_html(url))
+        if root is None:
+            return {"page": page, "total": 0, "list": []}
+
+        items = []
+        for node in root.xpath("//*[contains(@class,'module-search-item')]"):
+            href = "".join(node.xpath(".//*[contains(@class,'video-serial')][1]/@href")).strip()
+            title = "".join(node.xpath(".//*[contains(@class,'video-serial')][1]/@title")).strip()
+            pic = (
+                "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//img[1]/@data-src")).strip()
+                or "".join(node.xpath(".//*[contains(@class,'module-item-pic')]//img[1]/@src")).strip()
+            )
+            remarks = self._clean_text(
+                "".join(node.xpath(".//*[contains(@class,'video-serial')][1]//text()"))
+                or "".join(node.xpath(".//*[contains(@class,'module-item-text')][1]//text()"))
+            )
+            if not href or not title:
+                continue
+            items.append(
+                {
+                    "vod_id": href,
+                    "vod_name": title,
+                    "vod_pic": self._build_url(self._fix_img_url(pic)),
+                    "vod_remarks": remarks,
+                }
+            )
+        return {"page": page, "total": len(items), "list": items}
