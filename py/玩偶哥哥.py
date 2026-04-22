@@ -187,11 +187,11 @@ class Spider(BaseSpider):
             "vod_name": self._clean_text("".join(root.xpath("//*[contains(@class,'page-title')][1]//text()"))),
             "vod_pic": self._build_url(
                 self._fix_img_url(
-                    "".join(
-                        root.xpath(
-                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@data-src | "
-                            "//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@src"
-                        )
+                    (
+                        (root.xpath("//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@data-src") or [""])[0]
+                    ).strip()
+                    or (
+                        (root.xpath("//*[contains(@class,'mobile-play')]//*[contains(@class,'lazyload')][1]/@src") or [""])[0]
                     ).strip()
                 )
             ),
