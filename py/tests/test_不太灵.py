@@ -111,6 +111,69 @@ class TestBuTaiLingSpider(unittest.TestCase):
         self.assertEqual(result["total"], 2)
         self.assertEqual([item["vod_id"] for item in result["list"]], ["1", "2"])
 
+    def test_detect_drive_type_by_url(self):
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://pan.baidu.com/s/abc"), "baidu")
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://pan.quark.cn/s/abc"), "quark")
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://pan.xunlei.com/s/abc"), "xunlei")
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://www.alipan.com/s/abc"), "aliyun")
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://www.123pan.com/s/abc"), "a123")
+        self.assertEqual(self.spider._detect_drive_type_by_url("https://example.com/file"), "other")
+
+    def test_extract_pan_sources_creates_independent_lines_and_ignores_magnet_groups(self):
+        detail = {
+            "title": "示例详情",
+            "movies_online_seed": {
+                "夸克": [
+                    {"seed_name": "夸克资源A", "link": "https://pan.quark.cn/s/q1"},
+                    {"seed_name": "夸克资源A", "link": "https://pan.quark.cn/s/q1"},
+                ],
+                "百度网盘": [{"seed_name": "百度资源", "link": "https://pan.baidu.com/s/b1"}],
+                "未知": [{"seed_name": "未知资源", "link": "https://example.com/file"}],
+            },
+            "ecca": {"WEB-4K": [{"zlink": "magnet:?xt=1"}]},
+        }
+        play_from, play_url = self.spider._extract_pan_sources(detail)
+        self.assertEqual(play_from, "baidu#1$$$quark#1$$$other#1")
+        self.assertEqual(
+            play_url,
+            "baidu#1$https://pan.baidu.com/s/b1$$$quark#1$https://pan.quark.cn/s/q1$$$other#1$https://example.com/file",
+        )
+
+    @patch.object(Spider, "_request_api")
+    def test_detail_content_maps_metadata_and_pan_lines(self, mock_request_api):
+        mock_request_api.return_value = {
+            "doub_id": 88,
+            "title": "详情标题",
+            "image": "https://img.test/detail.jpg",
+            "ejs": "全 12 集",
+            "years": "2026",
+            "abstract": "这是一段剧情简介",
+            "performer": "演员甲/演员乙",
+            "director": "导演甲",
+            "production_area": "中国",
+            "movies_online_seed": {
+                "阿里": [{"seed_name": "阿里资源", "link": "https://www.alipan.com/s/ali1"}]
+            },
+        }
+        result = self.spider.detailContent(["88"])
+        vod = result["list"][0]
+        self.assertEqual(mock_request_api.call_args.args[0], "getVideoDetail")
+        self.assertEqual(mock_request_api.call_args.args[1], {"id": "88"})
+        self.assertEqual(vod["vod_id"], "88")
+        self.assertEqual(vod["vod_name"], "详情标题")
+        self.assertEqual(vod["vod_play_from"], "aliyun#1")
+        self.assertEqual(vod["vod_play_url"], "aliyun#1$https://www.alipan.com/s/ali1")
+
+    def test_player_content_passthroughs_share_links(self):
+        self.assertEqual(
+            self.spider.playerContent("quark#1", "https://pan.quark.cn/s/q1", {}),
+            {"parse": 0, "url": "https://pan.quark.cn/s/q1"},
+        )
+        self.assertEqual(
+            self.spider.playerContent("quark#1", "push://https://pan.quark.cn/s/q1", {}),
+            {"parse": 0, "url": "https://pan.quark.cn/s/q1"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

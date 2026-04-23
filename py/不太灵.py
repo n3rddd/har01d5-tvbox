@@ -12,6 +12,8 @@ sys.path.append("..")
 
 
 class Spider(BaseSpider):
+    DRIVE_ORDER = {"baidu": 1, "quark": 2, "xunlei": 3, "aliyun": 4, "a123": 5, "other": 99}
+
     def __init__(self):
         self.name = "不太灵"
         self.api_base = "https://web5.mukaku.com/prod/api/v1/"
@@ -177,6 +179,62 @@ class Spider(BaseSpider):
             "iswp": self._to01(ext_obj.get("iswp"), 0),
         }
 
+    def _normalize_drive_key(self, value):
+        text = str(value or "").strip().lower()
+        if text in {"alipan", "aliyun", "aliyundrive", "ali", "阿里"}:
+            return "aliyun"
+        if "quark" in text or "夸克" in text:
+            return "quark"
+        if "baidu" in text or "百度" in text:
+            return "baidu"
+        if "xunlei" in text or "迅雷" in text:
+            return "xunlei"
+        if "123" in text:
+            return "a123"
+        return "other"
+
+    def _detect_drive_type_by_url(self, url):
+        text = str(url or "").lower()
+        if "pan.quark.cn" in text:
+            return "quark"
+        if "pan.baidu.com" in text:
+            return "baidu"
+        if "pan.xunlei.com" in text:
+            return "xunlei"
+        if "alipan.com" in text or "aliyundrive.com" in text:
+            return "aliyun"
+        if "123865.com" in text or "123684.com" in text or "123pan.com" in text:
+            return "a123"
+        return "other"
+
+    def _extract_pan_sources(self, detail):
+        groups = (detail or {}).get("movies_online_seed")
+        if not isinstance(groups, dict):
+            return "", ""
+        seen = set()
+        counters = {}
+        entries = []
+        for group_name, items in groups.items():
+            for item in items or []:
+                link = str((item or {}).get("link") or "").strip()
+                if not link or link in seen:
+                    continue
+                seen.add(link)
+                kind = self._detect_drive_type_by_url(link)
+                if kind == "other":
+                    kind = self._normalize_drive_key(group_name)
+                counters[kind] = counters.get(kind, 0) + 1
+                line_name = f"{kind}#{counters[kind]}"
+                entries.append((line_name, link))
+        entries.sort(
+            key=lambda pair: (
+                self.DRIVE_ORDER.get(pair[0].split("#")[0], 999),
+                int(pair[0].split("#")[1]),
+                pair[0],
+            )
+        )
+        return "$$$".join(name for name, _ in entries), "$$$".join(f"{name}${url}" for name, url in entries)
+
     def homeContent(self, filter):
         return {"class": self.classes, "filters": self._build_filters(self._request_api("getVideoTypeList", {}))}
 
@@ -211,3 +269,20 @@ class Spider(BaseSpider):
         paged = self._paginate_items(self._dedupe_by_vod_id(matched), page, 20)
         paged["list"] = [self._normalize_video(item) for item in paged["list"]]
         return paged
+
+    def detailContent(self, ids):
+        vod_id = str(ids[0] if isinstance(ids, list) and ids else ids or "").strip()
+        if not vod_id:
+            return {"list": []}
+        data = self._request_api("getVideoDetail", {"id": vod_id})
+        if not isinstance(data, dict):
+            return {"list": []}
+        vod = self._normalize_video(data)
+        play_from, play_url = self._extract_pan_sources(data)
+        vod["vod_play_from"] = play_from
+        vod["vod_play_url"] = play_url
+        return {"list": [vod]}
+
+    def playerContent(self, flag, id, vipFlags):
+        raw = str(id or "").strip()
+        return {"parse": 0, "url": raw[7:] if raw.startswith("push://") else raw}
