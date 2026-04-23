@@ -146,3 +146,41 @@ class Spider(BaseSpider):
             "limit": 21,
             "total": 999999,
         }
+
+    def detailContent(self, ids):
+        result = {"list": []}
+        for raw_id in ids or []:
+            parts = str(raw_id).split("$", 1)
+            target_cid = parts[1] if len(parts) > 1 else parts[0]
+            url = f"https://node.video.qq.com/x/api/float_vinfo2?cid={target_cid}"
+            try:
+                payload = self.fetch(url, headers=self._headers()).json()
+            except Exception:
+                continue
+            cover = ((payload.get("c") or {}).get("pic") or "")
+            vod = {
+                "vod_id": raw_id,
+                "vod_name": ((payload.get("c") or {}).get("title") or ""),
+                "type_name": ",".join(payload.get("typ", []) or []),
+                "vod_actor": ",".join(payload.get("nam", []) or []),
+                "vod_year": ((payload.get("c") or {}).get("year") or ""),
+                "vod_content": ((payload.get("c") or {}).get("description") or ""),
+                "vod_remarks": payload.get("rec", "") or "",
+                "vod_pic": cover if cover.startswith("http") else self.base_host + cover,
+                "vod_play_from": "",
+                "vod_play_url": "",
+            }
+            video_ids = ((payload.get("c") or {}).get("video_ids") or [])
+            if video_ids:
+                detail_map = {item.get("vid"): item for item in self._get_batch_video_info(video_ids)}
+                play_items = []
+                for vid in video_ids:
+                    item = detail_map.get(vid, {"title": "", "type": ""})
+                    display_title = (item.get("title") or "选集").strip()
+                    if re.fullmatch(r"\d+", display_title):
+                        display_title = f"第{display_title}集"
+                    play_items.append(f"{display_title}${self.base_host}/x/cover/{target_cid}/{vid}.html")
+                vod["vod_play_from"] = "腾讯视频"
+                vod["vod_play_url"] = "#".join(play_items)
+            result["list"].append(vod)
+        return result

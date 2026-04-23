@@ -120,6 +120,42 @@ class TestTencentSpider(unittest.TestCase):
         result = self.spider._get_batch_video_info(["vid001"])
         self.assertEqual(result, [{"vid": "vid001", "title": "第1集", "type": "正片"}])
 
+    @patch.object(Spider, "_get_batch_video_info")
+    @patch.object(Spider, "fetch")
+    def test_detail_content_merges_main_and_trailer_into_single_line(self, mock_fetch, mock_get_batch_video_info):
+        mock_fetch.return_value = SimpleNamespace(
+            json=lambda: {
+                "c": {
+                    "title": "斗罗大陆",
+                    "year": "2024",
+                    "description": "热血冒险",
+                    "pic": "/cover.jpg",
+                    "video_ids": ["vid001", "vid002"],
+                },
+                "typ": ["热血", "冒险"],
+                "nam": ["配音甲", "配音乙"],
+                "rec": "更新中",
+            }
+        )
+        mock_get_batch_video_info.return_value = [
+            {"vid": "vid001", "title": "1", "type": "正片"},
+            {"vid": "vid002", "title": "终极预告", "type": "预告"},
+        ]
+
+        result = self.spider.detailContent(["tv$cid001"])
+        vod = result["list"][0]
+
+        self.assertEqual(vod["vod_id"], "tv$cid001")
+        self.assertEqual(vod["vod_name"], "斗罗大陆")
+        self.assertEqual(vod["type_name"], "热血,冒险")
+        self.assertEqual(vod["vod_actor"], "配音甲,配音乙")
+        self.assertEqual(vod["vod_pic"], "https://v.qq.com/cover.jpg")
+        self.assertEqual(vod["vod_play_from"], "腾讯视频")
+        self.assertEqual(
+            vod["vod_play_url"],
+            "第1集$https://v.qq.com/x/cover/cid001/vid001.html#终极预告$https://v.qq.com/x/cover/cid001/vid002.html",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
