@@ -47,6 +47,70 @@ class TestJiKanYingShiSpider(unittest.TestCase):
         decoded = base64.b64decode(result.encode("utf-8")).decode("utf-8")
         self.assertTrue(decoded)
 
+    @patch.object(Spider, "fetch")
+    @patch.object(Spider, "post")
+    def test_ensure_ready_fetches_host_token_and_config_once(self, mock_post, mock_fetch):
+        mock_fetch.side_effect = [
+            SimpleNamespace(text="https://appsky2025999.ideasz.net\n"),
+            SimpleNamespace(text=build_sk_payload('{"direct_link":[]}', self.spider.aes_key, self.spider.aes_iv)),
+        ]
+        mock_post.return_value = SimpleNamespace(
+            text=build_sk_payload("token-123", self.spider.aes_key, self.spider.aes_iv)
+        )
+
+        self.spider._ensure_ready()
+        self.spider._ensure_ready()
+
+        self.assertEqual(self.spider.api_host, "https://appsky2025999.ideasz.net")
+        self.assertEqual(self.spider.auth_token, "token-123")
+        self.assertEqual(self.spider.config_data, {"direct_link": []})
+        self.assertEqual(mock_post.call_count, 1)
+
+    @patch.object(Spider, "_fetch_filters")
+    @patch.object(Spider, "_fetch_api")
+    def test_home_content_returns_classes_filters_and_home_list(self, mock_fetch_api, mock_fetch_filters):
+        mock_fetch_api.side_effect = [
+            {"data": [{"type_id": "1", "type_name": "电影"}, {"type_id": "2", "type_name": "剧集"}]},
+            {"data": [{"vod_id": "v1", "vod_name": "首页推荐"}]},
+        ]
+        mock_fetch_filters.return_value = {
+            "1": [{"key": "year", "name": "年份", "value": [{"n": "全部", "v": ""}]}]
+        }
+
+        content = self.spider.homeContent(False)
+
+        self.assertEqual(
+            content["class"],
+            [{"type_id": "1", "type_name": "电影"}, {"type_id": "2", "type_name": "剧集"}],
+        )
+        self.assertEqual(content["filters"]["1"][0]["key"], "year")
+        self.assertEqual(content["list"], [{"vod_id": "v1", "vod_name": "首页推荐"}])
+
+    @patch.object(Spider, "_fetch_api")
+    def test_home_video_content_requests_randomlikeindex(self, mock_fetch_api):
+        mock_fetch_api.return_value = {"data": [{"vod_id": "x1", "vod_name": "推荐片"}]}
+
+        result = self.spider.homeVideoContent()
+
+        self.assertEqual(
+            mock_fetch_api.call_args.args,
+            ("/sk-api/vod/list", {"page": 1, "limit": 12, "type": "randomlikeindex"}),
+        )
+        self.assertEqual(result["list"][0]["vod_id"], "x1")
+
+    @patch.object(Spider, "_fetch_api")
+    def test_fetch_filters_maps_extend_fields_and_adds_sort(self, mock_fetch_api):
+        mock_fetch_api.return_value = {
+            "code": 200,
+            "data": {"extendtype": "动作,喜剧", "area": "大陆,香港", "lang": "国语", "year": "2025,2024"},
+        }
+
+        filters = self.spider._fetch_filters([{"type_id": "1", "type_name": "电影"}])
+
+        self.assertEqual(filters["1"][0]["key"], "class")
+        self.assertEqual(filters["1"][0]["value"][1], {"n": "动作", "v": "动作"})
+        self.assertEqual(filters["1"][-1]["value"][-1], {"n": "评分", "v": "score"})
+
 
 if __name__ == "__main__":
     unittest.main()
