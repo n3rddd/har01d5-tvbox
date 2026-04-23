@@ -164,14 +164,20 @@ class TestBuTaiLingSpider(unittest.TestCase):
         self.assertEqual(vod["vod_play_from"], "aliyun#1")
         self.assertEqual(vod["vod_play_url"], "aliyun#1$https://www.alipan.com/s/ali1")
 
-    def test_player_content_passthroughs_share_links(self):
+    def test_player_content_passthroughs_share_links_with_tvbox_shape(self):
         self.assertEqual(
             self.spider.playerContent("quark#1", "https://pan.quark.cn/s/q1", {}),
-            {"parse": 0, "url": "https://pan.quark.cn/s/q1"},
+            {"parse": 0, "playUrl": "", "url": "https://pan.quark.cn/s/q1"},
         )
         self.assertEqual(
             self.spider.playerContent("quark#1", "push://https://pan.quark.cn/s/q1", {}),
-            {"parse": 0, "url": "https://pan.quark.cn/s/q1"},
+            {"parse": 0, "playUrl": "", "url": "https://pan.quark.cn/s/q1"},
+        )
+
+    def test_player_content_returns_empty_url_for_non_pan_links(self):
+        self.assertEqual(
+            self.spider.playerContent("other#1", "https://example.com/file", {}),
+            {"parse": 0, "playUrl": "", "url": ""},
         )
 
 

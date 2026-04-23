@@ -207,6 +207,23 @@ class Spider(BaseSpider):
             return "a123"
         return "other"
 
+    def _is_supported_pan_url(self, url):
+        text = str(url or "").strip().lower()
+        return any(
+            token in text
+            for token in [
+                "pan.quark.cn",
+                "pan.baidu.com",
+                "pan.xunlei.com",
+                "alipan.com",
+                "aliyundrive.com",
+                "123865.com",
+                "123684.com",
+                "123pan.com",
+                "drive.uc.cn",
+            ]
+        )
+
     def _extract_pan_sources(self, detail):
         groups = (detail or {}).get("movies_online_seed")
         if not isinstance(groups, dict):
@@ -285,4 +302,7 @@ class Spider(BaseSpider):
 
     def playerContent(self, flag, id, vipFlags):
         raw = str(id or "").strip()
-        return {"parse": 0, "url": raw[7:] if raw.startswith("push://") else raw}
+        url = raw[7:] if raw.startswith("push://") else raw
+        if self._is_supported_pan_url(url):
+            return {"parse": 0, "playUrl": "", "url": url}
+        return {"parse": 0, "playUrl": "", "url": ""}
