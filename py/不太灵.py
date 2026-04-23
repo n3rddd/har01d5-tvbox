@@ -1,7 +1,8 @@
 # coding=utf-8
+import base64
 import json
 import sys
-from urllib.parse import urlencode, urljoin
+from urllib.parse import unquote, urlencode, urljoin
 
 import requests
 
@@ -108,9 +109,105 @@ class Spider(BaseSpider):
             "vod_area": data.get("production_area") or "",
         }
 
+    def _parse_ext_object(self, ext):
+        candidates = [ext]
+        try:
+            decoded = base64.b64decode(str(ext or "")).decode("utf-8")
+            if decoded and decoded != ext:
+                candidates.append(decoded)
+        except Exception:
+            pass
+        for raw in list(candidates):
+            try:
+                decoded = unquote(str(raw))
+                if decoded != raw:
+                    candidates.append(decoded)
+            except Exception:
+                pass
+        for raw in candidates:
+            try:
+                value = json.loads(raw)
+                if isinstance(value, dict):
+                    return value
+            except Exception:
+                continue
+        return {}
+
+    def _normalize_filter_value(self, value):
+        text = str(value or "").strip()
+        return "" if text in {"", "0", "不限", "all"} else text
+
+    def _to01(self, value, fallback=0):
+        text = str(value if value is not None else fallback).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return 1
+        if text in {"0", "false", "no", "off", ""}:
+            return 0
+        return fallback
+
+    def _dedupe_by_vod_id(self, items):
+        result = []
+        seen = set()
+        for item in items or []:
+            vod_id = str((item or {}).get("doub_id") or (item or {}).get("id") or "")
+            if not vod_id or vod_id in seen:
+                continue
+            seen.add(vod_id)
+            result.append(item)
+        return result
+
+    def _paginate_items(self, items, page, limit):
+        page_num = max(1, int(page))
+        size = max(1, int(limit))
+        total = len(items)
+        start = (page_num - 1) * size
+        return {"page": page_num, "limit": size, "total": total, "list": items[start:start + size]}
+
+    def _build_movie_params(self, tid, pg, ext):
+        ext_obj = self._parse_ext_object(ext)
+        return {
+            "sa": int(tid),
+            "page": int(pg),
+            "sc": self._normalize_filter_value(ext_obj.get("sc")),
+            "sd": self._normalize_filter_value(ext_obj.get("sd")),
+            "se": self._normalize_filter_value(ext_obj.get("se")),
+            "sf": self._normalize_filter_value(ext_obj.get("sf")),
+            "sh": self._normalize_filter_value(ext_obj.get("sh")),
+            "sg": self._normalize_filter_value(ext_obj.get("sg")) or "1",
+            "iswp": self._to01(ext_obj.get("iswp"), 0),
+        }
+
     def homeContent(self, filter):
         return {"class": self.classes, "filters": self._build_filters(self._request_api("getVideoTypeList", {}))}
 
     def homeVideoContent(self):
         items = self._request_api("getVideoList", {"sc": "3", "limit": 20}) or []
         return {"list": [self._normalize_video(item) for item in items]}
+
+    def categoryContent(self, tid, pg, filter, extend):
+        page = int(pg)
+        if str(tid) in {"1", "2"}:
+            items = self._dedupe_by_vod_id(
+                self._request_api("getVideoMovieList", self._build_movie_params(tid, page, extend)) or []
+            )
+            return {
+                "page": page,
+                "limit": len(items) or 20,
+                "total": page * 20 + len(items),
+                "list": [self._normalize_video(item) for item in items],
+            }
+        items = self._dedupe_by_vod_id(self._request_api("getVideoList", {"sc": str(tid), "page": 1, "limit": 300}) or [])
+        paged = self._paginate_items(items, page, 20)
+        paged["list"] = [self._normalize_video(item) for item in paged["list"]]
+        return paged
+
+    def searchContent(self, key, quick, pg="1"):
+        keyword = str(key or "").strip()
+        page = int(pg)
+        if not keyword:
+            return {"page": page, "total": 0, "list": []}
+        items = self._request_api("getVideoList", {"sb": keyword, "page": 1, "limit": 300}) or []
+        matched = [item for item in items if keyword.lower() in str((item or {}).get("title") or "").lower()]
+        paged = self._paginate_items(self._dedupe_by_vod_id(matched), page, 20)
+        paged["list"] = [self._normalize_video(item) for item in paged["list"]]
+        return paged

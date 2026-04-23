@@ -62,6 +62,55 @@ class TestBuTaiLingSpider(unittest.TestCase):
         result = self.spider._request_api("getVideoList", {"page": 1})
         self.assertEqual(result, [{"doub_id": 1}])
 
+    def test_parse_ext_object_supports_plain_urlencoded_and_base64_json(self):
+        plain = self.spider._parse_ext_object('{"sc":"动作"}')
+        encoded = self.spider._parse_ext_object("%7B%22sd%22%3A%22中国%22%7D")
+        wrapped = self.spider._parse_ext_object("eyJzZSI6IjIwMjYifQ==")
+        self.assertEqual(plain["sc"], "动作")
+        self.assertEqual(encoded["sd"], "中国")
+        self.assertEqual(wrapped["se"], "2026")
+
+    @patch.object(Spider, "_request_api")
+    def test_category_content_movie_uses_filter_params(self, mock_request_api):
+        mock_request_api.return_value = [
+            {"doub_id": 21, "title": "电影A", "image": "a.jpg", "ejs": "4K"},
+            {"doub_id": 21, "title": "电影A", "image": "a.jpg", "ejs": "4K"},
+        ]
+        result = self.spider.categoryContent("1", "2", False, '{"sc":"动作","sd":"中国","iswp":"1","status":"更新中"}')
+        self.assertEqual(mock_request_api.call_args.args[0], "getVideoMovieList")
+        self.assertEqual(
+            mock_request_api.call_args.args[1],
+            {"sa": 1, "page": 2, "sc": "动作", "sd": "中国", "se": "", "sf": "", "sh": "", "sg": "1", "iswp": 1},
+        )
+        self.assertEqual(result["page"], 2)
+        self.assertEqual(len(result["list"]), 1)
+        self.assertNotIn("pagecount", result)
+
+    @patch.object(Spider, "_request_api")
+    def test_category_content_hot_uses_local_dedupe_and_pagination(self, mock_request_api):
+        mock_request_api.return_value = [
+            {"doub_id": 1, "title": "A"},
+            {"doub_id": 1, "title": "A"},
+            {"doub_id": 2, "title": "B"},
+        ]
+        result = self.spider.categoryContent("3", "1", False, {})
+        self.assertEqual(mock_request_api.call_args.args[0], "getVideoList")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(result["list"]), 2)
+
+    @patch.object(Spider, "_request_api")
+    def test_search_content_filters_by_name_and_dedupes(self, mock_request_api):
+        mock_request_api.return_value = [
+            {"doub_id": 1, "title": "繁花", "image": "1.jpg"},
+            {"doub_id": 2, "title": "繁花幕后", "image": "2.jpg"},
+            {"doub_id": 2, "title": "繁花幕后", "image": "2.jpg"},
+            {"doub_id": 3, "title": "别的内容", "image": "3.jpg"},
+        ]
+        result = self.spider.searchContent("繁花", False, "1")
+        self.assertEqual(mock_request_api.call_args.args[0], "getVideoList")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([item["vod_id"] for item in result["list"]], ["1", "2"])
+
 
 if __name__ == "__main__":
     unittest.main()
