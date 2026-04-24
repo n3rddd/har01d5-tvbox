@@ -1,9 +1,13 @@
 # coding=utf-8
 import base64
+import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
-from urllib.parse import quote, urljoin
+import tempfile
+from urllib.parse import quote, urlencode, urljoin
 
 from lxml import html as lxml_html
 
@@ -16,6 +20,7 @@ class Spider(BaseSpider):
     def __init__(self):
         self.name = "两个BT"
         self.host = "https://www.bttwoo.com"
+        self._wasm_asset_cache = {}
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -64,17 +69,17 @@ class Spider(BaseSpider):
         keyword = self._clean_text(key)
         if not keyword:
             return {"page": page, "limit": 0, "total": 0, "list": []}
-        url = self.host + f"/xssssearch?q={quote(keyword)}"
+        url = self.host + f"/search?q={quote(keyword)}"
         if page > 1:
-            url += f"&p={page}"
+            url += f"&page={page}"
         items = self._extract_cards(self._request_html(url), keyword=keyword)
         return {"page": page, "limit": len(items), "total": len(items), "list": items}
 
     def detailContent(self, ids):
-        vod_id = str(ids[0] if isinstance(ids, list) and ids else ids or "").strip()
+        vod_id = self._normalize_vod_id(ids[0] if isinstance(ids, list) and ids else ids)
         if not vod_id:
             return {"list": []}
-        html = self._request_html(self.host + f"/movie/{vod_id}.html")
+        html = self._request_html(self._build_detail_url(vod_id))
         detail = self._parse_detail(html, vod_id)
         return {"list": [detail]} if detail else {"list": []}
 
@@ -85,7 +90,13 @@ class Spider(BaseSpider):
 
         meta = self._decode_play_id(play_id)
         pid = meta.get("pid") or play_id
-        play_page_url = self.host + f"/v_play/{pid}.html"
+        play_path = self._extract_play_path(pid)
+        if str(pid or "").startswith(("http://", "https://")):
+            play_page_url = str(pid)
+        elif play_path:
+            play_page_url = self._abs_url(play_path)
+        else:
+            play_page_url = self.host + f"/v_play/{pid}.html"
         html = self._request_html(play_page_url, referer=self.host + "/")
         media_url = self._extract_media_url(html)
         if media_url:
@@ -97,6 +108,17 @@ class Spider(BaseSpider):
             iframe_media_url = self._extract_media_url(iframe_html)
             if iframe_media_url:
                 return self._build_player_result(iframe_media_url, iframe_url)
+
+        if play_path:
+            self._cache_wasm_assets(html)
+            dataid = self._extract_play_dataid(html, play_page_url)
+            secret_key = play_path.rsplit("/", 1)[-1]
+            userlink = self._extract_userlink(html) or "0"
+            api_url = self._build_wasm_play_api_url(dataid, secret_key, "1080", userlink)
+            api_data = self._request_json(api_url, referer=play_page_url)
+            media_url = self._extract_media_from_play_api(api_data)
+            if media_url:
+                return self._build_player_result(media_url, play_page_url)
 
         return self._build_parse_result(play_page_url, play_page_url)
 
@@ -113,9 +135,30 @@ class Spider(BaseSpider):
 
     def _build_category_url(self, tid, page):
         path = str(tid or "").strip().lstrip("/")
+        filters = {
+            "zgjun": {"classify": "2", "tvclasses": "20"},
+            "meiju": {"classify": "2", "tvclasses": "21"},
+            "jpsrtv": {"classify": "2", "tvclasses": "22"},
+            "movie_bt_tags/xiju": {"classify": "1", "types": "5"},
+            "movie_bt_tags/aiqing": {"classify": "1", "types": "6"},
+            "movie_bt_tags/adt": {"classify": "1", "types": "18"},
+            "movie_bt_tags/at": {"classify": "1", "types": "10"},
+            "movie_bt_tags/donghua": {"classify": "1", "types": "11"},
+            "movie_bt_tags/qihuan": {"classify": "1", "types": "12"},
+            "movie_bt_tags/xuanni": {"classify": "1", "types": "2"},
+            "movie_bt_tags/kehuan": {"classify": "1", "types": "14"},
+            "movie_bt_tags/juqing": {"classify": "1", "types": "1"},
+            "movie_bt_tags/kongbu": {"classify": "1", "types": "3"},
+            "gf": {"classify": "1", "sort_by": "score", "order": "desc"},
+        }.get(path)
+        if filters:
+            params = dict(filters)
+            if page > 1:
+                params["page"] = str(page)
+            return self.host + "/filter?" + urlencode(params)
         url = self.host + "/" + path
         if page > 1:
-            url += f"?paged={page}"
+            url += f"?page={page}"
         return url
 
     def _extract_cards(self, html, keyword=None):
@@ -124,13 +167,21 @@ class Spider(BaseSpider):
             return []
         results = []
         seen = set()
-        for node in root.xpath("//li[.//a[contains(@href,'/movie/')]]"):
-            href = self._first_attr(node, ".//a[contains(@href,'/movie/')][1]", "href")
-            vod_id = self._extract_vod_id(href)
+        nodes = root.xpath(
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' movie-card ')]"
+            "|//li[.//a[contains(@href,'/movie/')]]"
+        )
+        for node in nodes:
+            href = (
+                self._first_attr(node, ".//a[contains(@href,'/play/')][1]", "href")
+                or self._first_attr(node, ".//a[contains(@href,'/movie/')][1]", "href")
+            )
+            vod_id = self._extract_card_id(href)
             title = (
                 self._first_text(node, ".//h3//a[1]")
                 or self._first_text(node, ".//h3[1]")
                 or self._clean_text(self._first_attr(node, ".//a[@title][1]", "title"))
+                or self._clean_text(self._first_attr(node, ".//img[@alt][1]", "alt"))
                 or self._first_text(node, ".//*[contains(@class,'title')][1]")
                 or self._first_text(node, ".//*[contains(@class,'name')][1]")
             )
@@ -146,6 +197,9 @@ class Spider(BaseSpider):
             remarks = (
                 self._first_text(node, ".//*[contains(@class,'rating')][1]")
                 or self._first_text(node, ".//*[contains(@class,'status')][1]")
+                or self._first_text(node, ".//span[contains(text(),'集')][1]")
+                or self._first_text(node, ".//span[contains(text(),'HD')][1]")
+                or self._first_text(node, ".//span[contains(text(),'4k')][1]")
             )
             seen.add(vod_id)
             results.append(
@@ -177,9 +231,36 @@ class Spider(BaseSpider):
         matched = re.search(r"/movie/(\d+)\.html", str(href or "").strip())
         return matched.group(1) if matched else ""
 
+    def _extract_play_path(self, href):
+        raw = str(href or "").strip()
+        if "/play/" not in raw:
+            return ""
+        path = raw[raw.find("/play/") :]
+        return path.split("?", 1)[0].split("#", 1)[0]
+
+    def _extract_card_id(self, href):
+        return self._extract_play_path(href) or self._extract_vod_id(href)
+
     def _extract_play_pid(self, href):
         matched = re.search(r"/v_play/([^.]+)\.html", str(href or "").strip())
         return matched.group(1) if matched else ""
+
+    def _normalize_vod_id(self, value):
+        raw = str(value or "").strip()
+        return self._extract_play_path(raw) or raw
+
+    def _build_detail_url(self, vod_id):
+        raw = str(vod_id or "").strip()
+        if not raw:
+            return ""
+        if raw.startswith(("http://", "https://")):
+            return raw
+        play_path = self._extract_play_path(raw)
+        if play_path:
+            return self._abs_url(play_path)
+        if raw.startswith("/movie/"):
+            return self._abs_url(raw)
+        return self.host + f"/movie/{raw}.html"
 
     def _parse_detail(self, html, vod_id):
         root = self._parse_html(html)
@@ -187,29 +268,39 @@ class Spider(BaseSpider):
             return None
 
         vod_name = (
-            self._first_text(root, "//h1[1]")
+            self._first_text(root, "//*[contains(@class,'movie-poster')]//h1[1]")
+            or self._first_text(root, "//h1[1]")
             or self._first_text(root, "//h2[1]")
             or self._extract_title_text(html)
         )
         vod_pic = (
-            self._first_attr(root, "//img[contains(@class,'poster')][1]", "src")
+            self._first_attr(root, "//meta[@property='og:image'][1]", "content")
+            or self._first_attr(root, "//*[contains(@class,'movie-poster')]//img[1]", "src")
+            or self._first_attr(root, "//img[contains(@class,'poster')][1]", "src")
             or self._first_attr(root, "//*[contains(@class,'poster')]//img[1]", "src")
             or self._first_attr(root, "//img[1]", "src")
         )
         vod_content = (
-            self._first_text(root, "//*[contains(@class,'intro')][1]")
+            self._first_attr(root, "//meta[@name='description'][1]", "content")
+            or self._first_text(root, "//*[contains(text(),'剧情简介')]/following::p[1]")
+            or self._first_text(root, "//*[contains(@class,'intro')][1]")
             or self._first_text(root, "//*[contains(@class,'description')][1]")
             or self._first_text(root, "//*[contains(@class,'desc')][1]")
         )
-        vod_actor = self._extract_meta_text(root, "主演")
-        vod_director = self._extract_meta_text(root, "导演")
+        vod_actor = self._extract_labeled_value(root, "主演") or self._extract_meta_text(root, "主演")
+        vod_director = self._extract_labeled_value(root, "导演") or self._extract_meta_text(root, "导演")
 
         episodes = []
         seen = set()
-        for index, node in enumerate(root.xpath("//a[contains(@href,'/v_play/')]")):
+        episode_nodes = root.xpath(
+            "//*[@x-data[contains(.,'episodeManager')]]//a[contains(@href,'/play/')]"
+            "|//*[contains(@class,'episode-link') and contains(@href,'/play/')]"
+            "|//a[contains(@href,'/v_play/')]"
+        )
+        for index, node in enumerate(episode_nodes):
             href = str(node.get("href") or "").strip()
-            pid = self._extract_play_pid(href)
-            name = self._clean_text(node.text_content()) or f"第{index + 1}集"
+            pid = self._extract_play_path(href) or self._extract_play_pid(href)
+            name = self._clean_text(node.text_content()) or self._clean_text(node.get("data-episode")) or f"第{index + 1}集"
             if not pid or pid in seen:
                 continue
             seen.add(pid)
@@ -256,6 +347,137 @@ class Spider(BaseSpider):
     def _extract_meta_text(self, root, label):
         text = self._first_text(root, f"//*[contains(text(),'{label}')][1]")
         return re.sub(rf"^{label}[:：]?", "", text).strip()
+
+    def _extract_labeled_value(self, root, label):
+        if root is None:
+            return ""
+        for node in root.xpath(
+            f"//*[normalize-space(text())='{label}' or contains(text(),'{label}：') or contains(text(),'{label}:')]"
+        ):
+            text = self._clean_text(node.text_content())
+            inline = re.sub(rf"^{label}[:：]?", "", text).strip()
+            if inline and inline != text:
+                return inline
+            sibling = node.getnext()
+            if sibling is not None:
+                sibling_text = self._clean_text(sibling.text_content())
+                if sibling_text:
+                    return sibling_text
+        return ""
+
+    def _extract_userlink(self, html):
+        matched = re.search(r"userlink:'([^']+)'", str(html or ""))
+        return str(matched.group(1) or "").strip() if matched else ""
+
+    def _extract_play_dataid(self, html, play_page_url):
+        root = self._parse_html(html)
+        if root is None:
+            return ""
+        play_path = self._extract_play_path(play_page_url)
+        if play_path:
+            for node in root.xpath(f"//a[@dataid and contains(@href,'{play_path}')]"):
+                dataid = str(node.get("dataid") or "").strip()
+                if dataid:
+                    return dataid
+        return self._first_attr(root, "//a[@dataid][1]", "dataid")
+
+    def _cache_wasm_assets(self, html):
+        js_rel = self._first_attr(self._parse_html(html), "//*[@id='wasm-cfg'][1]", "data-js")
+        wasm_rel = self._first_attr(self._parse_html(html), "//*[@id='wasm-cfg'][1]", "data-bg")
+        if not js_rel or not wasm_rel:
+            return
+        cache_key = f"{js_rel}|{wasm_rel}"
+        cached = self._wasm_asset_cache.get(cache_key)
+        if cached and os.path.exists(cached.get("js", "")) and os.path.exists(cached.get("wasm", "")):
+            self._wasm_asset_cache["active"] = cached
+            return
+        tmp_dir = tempfile.gettempdir()
+        js_path = os.path.join(tmp_dir, f"lianggebt_{hashlib.md5(js_rel.encode('utf-8')).hexdigest()}.mjs")
+        wasm_path = os.path.join(tmp_dir, f"lianggebt_{hashlib.md5(wasm_rel.encode('utf-8')).hexdigest()}.wasm")
+        if not os.path.exists(js_path):
+            response = self.fetch(self._abs_url(js_rel), headers=self.headers, timeout=15, verify=False)
+            if response.status_code == 200:
+                with open(js_path, "w", encoding="utf-8") as handle:
+                    handle.write(response.text or "")
+        if not os.path.exists(wasm_path):
+            response = self.fetch(self._abs_url(wasm_rel), headers=self.headers, timeout=15, verify=False)
+            if response.status_code == 200:
+                with open(wasm_path, "wb") as handle:
+                    handle.write(response.content or b"")
+        active = {"js": js_path, "wasm": wasm_path}
+        self._wasm_asset_cache[cache_key] = active
+        self._wasm_asset_cache["active"] = active
+
+    def _build_wasm_play_api_url(self, dataid, secret_key, quality, userlink):
+        active = self._wasm_asset_cache.get("active") or {}
+        js_path = active.get("js", "")
+        wasm_path = active.get("wasm", "")
+        if not dataid or not secret_key or not js_path or not wasm_path:
+            return ""
+        if not os.path.exists(js_path) or not os.path.exists(wasm_path):
+            return ""
+        script = (
+            "import { pathToFileURL } from 'node:url';"
+            "const mod = await import(pathToFileURL(process.argv[1]).href);"
+            "await mod.default({module_or_path: await (await import('node:fs/promises')).readFile(process.argv[2])});"
+            "console.log(mod.build_play_url(process.argv[3], process.argv[4], process.argv[5], process.argv[6]));"
+        )
+        try:
+            result = subprocess.run(
+                [
+                    "node",
+                    "--input-type=module",
+                    "-e",
+                    script,
+                    js_path,
+                    wasm_path,
+                    str(dataid),
+                    str(secret_key),
+                    str(quality or "1080"),
+                    str(userlink or "0"),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except Exception:
+            return ""
+        if result.returncode != 0:
+            return ""
+        return self._abs_url((result.stdout or "").strip())
+
+    def _request_json(self, url, referer=None):
+        target = str(url or "").strip()
+        if not target:
+            return {}
+        headers = dict(self.headers)
+        headers["Referer"] = referer or self.headers["Referer"]
+        headers["Accept"] = "application/json,text/plain,*/*"
+        try:
+            response = self.fetch(target, headers=headers, timeout=15, verify=False)
+        except Exception:
+            return {}
+        if response.status_code != 200:
+            return {}
+        try:
+            return json.loads(response.text or "{}")
+        except Exception:
+            return {}
+
+    def _extract_media_from_play_api(self, data):
+        payload = ((data or {}).get("data") or {}) if isinstance(data, dict) else {}
+        quality_urls = payload.get("quality_urls") or []
+        current_quality = self._to_int(payload.get("current_quality"), 0)
+        ordered = []
+        if 0 <= current_quality < len(quality_urls):
+            ordered.append(quality_urls[current_quality])
+        ordered.extend([item for index, item in enumerate(quality_urls) if index != current_quality])
+        for item in ordered:
+            url = str((item or {}).get("url") or "").strip()
+            if url and url != "1":
+                return self._abs_url(url)
+        return ""
 
     def _extract_media_url(self, html):
         body = str(html or "")
