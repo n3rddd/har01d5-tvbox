@@ -30,6 +30,50 @@ HOME_HTML = """
 </html>
 """
 
+PLAYLIST_HTML = """
+<html><body>
+  <ul class="video_list">
+    <li>
+      <div class="name"><a href="/playlist/gedan001.html">华语经典</a></div>
+      <div class="pic"><img src="/img/list.jpg"></div>
+    </li>
+  </ul>
+</body></html>
+"""
+
+SINGER_HTML = """
+<html><body>
+  <ul class="singer_list">
+    <li>
+      <div class="pic"><a href="/singer/zhoujielun.html"><img src="/img/singer.jpg"></a></div>
+      <div class="name"><a>周杰伦</a></div>
+    </li>
+  </ul>
+</body></html>
+"""
+
+MV_HTML = """
+<html><body>
+  <ul class="video_list">
+    <li>
+      <div class="name"><a href="/mp4/999.html">晴天MV</a></div>
+      <div class="pic"><img src="/img/mv2.jpg"></div>
+    </li>
+  </ul>
+</body></html>
+"""
+
+SEARCH_HTML = """
+<html><body>
+  <ul class="play_list">
+    <li><div class="name"><a href="/mp3/777.html">七里香</a></div><img src="/img/1.jpg"></li>
+    <li><div class="name"><a href="/mp4/778.html">七里香MV</a></div><img src="/img/2.jpg"></li>
+    <li><div class="name"><a href="/playlist/top777.html">周董精选</a></div><img src="/img/3.jpg"></li>
+    <li><div class="name"><a href="/singer/jay.html">周杰伦</a></div><img src="/img/4.jpg"></li>
+  </ul>
+</body></html>
+"""
+
 
 class TestSJMusicSpider(unittest.TestCase):
     def setUp(self):
@@ -55,6 +99,51 @@ class TestSJMusicSpider(unittest.TestCase):
         mock_fetch.return_value = SimpleNamespace(status_code=200, text=HOME_HTML)
         result = self.spider.homeVideoContent()
         self.assertEqual([item["vod_id"] for item in result["list"]], ["song:123", "mv:456"])
+
+    @patch.object(Spider, "fetch")
+    def test_category_content_supports_rank_playlist_singer_and_mv(self, mock_fetch):
+        mock_fetch.side_effect = [
+            SimpleNamespace(status_code=200, text=PLAYLIST_HTML),
+            SimpleNamespace(status_code=200, text=SINGER_HTML),
+            SimpleNamespace(status_code=200, text=MV_HTML),
+        ]
+        rank_result = self.spider.categoryContent("rank_list", "1", False, {})
+        playlist_result = self.spider.categoryContent("playlist", "1", False, {"lang": "index"})
+        singer_result = self.spider.categoryContent(
+            "singer",
+            "1",
+            False,
+            {"sex": "girl", "area": "huayu", "char": "index"},
+        )
+        mv_result = self.spider.categoryContent(
+            "mv",
+            "1",
+            False,
+            {"area": "index", "type": "index", "sort": "new"},
+        )
+        self.assertTrue(rank_result["list"][0]["vod_id"].startswith("rank:"))
+        self.assertEqual(playlist_result["list"][0]["vod_id"], "playlist:gedan001")
+        self.assertEqual(singer_result["list"][0]["vod_id"], "singer:zhoujielun")
+        self.assertEqual(mv_result["list"][0]["vod_id"], "mv:999")
+
+    @patch.object(Spider, "fetch")
+    def test_search_content_maps_link_types_and_blank_keyword(self, mock_fetch):
+        mock_fetch.return_value = SimpleNamespace(status_code=200, text=SEARCH_HTML)
+        result = self.spider.searchContent("周杰伦", False, "1")
+        self.assertEqual(
+            [item["vod_id"] for item in result["list"]],
+            ["song:777", "mv:778", "playlist:top777", "singer:jay"],
+        )
+        self.assertEqual(
+            self.spider.searchContent("", False, "1"),
+            {"page": 1, "limit": 0, "total": 0, "list": []},
+        )
+
+    def test_category_content_returns_empty_for_unknown_tid(self):
+        self.assertEqual(
+            self.spider.categoryContent("unknown", "1", False, {}),
+            {"page": 1, "limit": 0, "total": 0, "list": []},
+        )
 
 
 if __name__ == "__main__":
