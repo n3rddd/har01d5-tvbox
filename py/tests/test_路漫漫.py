@@ -161,6 +161,34 @@ class TestLuManManSpider(unittest.TestCase):
         self.assertEqual(result["parse"], 1)
         self.assertEqual(result["url"], "https://www.lmm85.com/vod/play/1001-1-1.html")
 
+    @patch.object(Spider, "_post_json")
+    @patch.object(Spider, "_get_html")
+    def test_resolve_player_url_requests_parser_api_with_decrypted_token(self, mock_html, mock_post_json):
+        player = {"url": "source-id", "encrypt": "0", "from": "lineA"}
+        mock_html.side_effect = [
+            'document.querySelector("iframe").src = MacPlayer.Parse + MacPlayer.PlayUrl + "&type=m3u8";',
+            '<script>var vid="vid-1";var t="123";var token="YxF6M7yw8U7OQcW9t6Qx4w==";var act="play";var play="1";post("/api.php",{});</script>',
+        ]
+        mock_post_json.return_value = {"url": "https://cdn.example.com/final.m3u8"}
+        with patch.object(self.spider, "_decrypt_token", return_value="decoded-token") as mock_decrypt:
+            result = self.spider._resolve_player_url(player, "https://www.lmm85.com/vod/play/1001-1-1.html")
+        self.assertEqual(result, "https://cdn.example.com/final.m3u8")
+        mock_decrypt.assert_called_once_with("YxF6M7yw8U7OQcW9t6Qx4w==")
+        mock_post_json.assert_called_once_with(
+            "https://www.lmm85.com/api.php",
+            {"vid": "vid-1", "t": "123", "token": "decoded-token", "act": "play", "play": "1"},
+            referer="https://www.lmm85.com",
+        )
+
+    @patch.object(Spider, "_post_json", return_value={})
+    @patch.object(Spider, "_get_html", return_value='document.querySelector("iframe").src = "";')
+    def test_resolve_player_url_returns_empty_when_chain_cannot_be_built(self, mock_html, mock_post_json):
+        result = self.spider._resolve_player_url(
+            {"url": "vid", "encrypt": "0", "from": "lineA"},
+            "https://www.lmm85.com/vod/play/1.html",
+        )
+        self.assertEqual(result, "")
+
 
 if __name__ == "__main__":
     unittest.main()

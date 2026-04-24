@@ -234,10 +234,55 @@ class Spider(BaseSpider):
             "Origin": self.host,
         }
 
+    def _post_json(self, url, data, referer=None):
+        headers = self._build_player_headers(referer or self.host)
+        response = self.post(url, data=data, headers=headers, timeout=10, verify=False)
+        if response.status_code != 200:
+            return {}
+        try:
+            return json.loads(response.text or "{}")
+        except Exception:
+            return {}
+
+    def _extract_js_src(self, js_text, video_url, play_page_url):
+        matched = re.search(r"\.src\s*=\s*(.*?);", str(js_text or ""))
+        if not matched:
+            return ""
+        raw = re.sub(r"[\+\s']", "", matched.group(1))
+        raw = raw.replace("MacPlayer.PlayUrl", video_url)
+        raw = raw.replace("window.location.href", play_page_url)
+        raw = raw.replace("MacPlayer.Parse", self.host + "/?url=")
+        return raw
+
     def _resolve_player_url(self, player, play_page_url):
         media = self._decode_player_url(player.get("url", ""), player.get("encrypt", "0"))
         if self._is_media_url(media):
             return media.split("&", 1)[0]
+        source = self._clean_text(player.get("from", ""))
+        if not media or not source:
+            return ""
+        js_url = f"{self.host}/static/player/{source}.js"
+        js_text = self._get_html(js_url, headers={"Referer": play_page_url})
+        iframe_url = self._extract_js_src(js_text, media, play_page_url)
+        if not iframe_url or "type=" not in iframe_url:
+            return ""
+        iframe_html = self._get_html(iframe_url, headers={"Referer": self.host})
+        if not re.search(r'vid\s*=\s*".+?"', iframe_html):
+            return ""
+        api_path = self.regStr(r'post\("(.*?)"', iframe_html)
+        if not api_path:
+            return ""
+        post_url = urljoin(self.host + "/", api_path.lstrip("/"))
+        token = self.regStr(r'token\s*=\s*"(.*?)"', iframe_html)
+        payload = {
+            "vid": self.regStr(r'vid\s*=\s*"(.*?)"', iframe_html),
+            "t": self.regStr(r'var\s+t\s*=\s*"(.*?)"', iframe_html),
+            "token": self._decrypt_token(token),
+            "act": self.regStr(r'act\s*=\s*"(.*?)"', iframe_html),
+            "play": self.regStr(r'play\s*=\s*"(.*?)"', iframe_html),
+        }
+        data = self._post_json(post_url, payload, referer=self.host)
+        return str(data.get("url", "")).strip()
         return ""
 
     def playerContent(self, flag, id, vipFlags):
