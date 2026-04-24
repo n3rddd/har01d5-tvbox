@@ -163,3 +163,43 @@ class TestSiWanSpider(unittest.TestCase):
             vod["vod_play_url"],
             "第1集$https://cdn.example/1.m3u8#第2集$play-2$$$正片$play-3",
         )
+
+    @patch.object(Spider, "_api_get")
+    def test_category_content_returns_empty_payload_on_api_error(self, mock_api_get):
+        mock_api_get.side_effect = ValueError("boom")
+        self.assertEqual(
+            self.spider.categoryContent("20", "1", False, {}),
+            {"page": 1, "limit": 0, "total": 0, "list": []},
+        )
+
+    @patch.object(Spider, "_api_get")
+    def test_detail_content_returns_empty_list_on_api_error(self, mock_api_get):
+        mock_api_get.side_effect = ValueError("boom")
+        self.assertEqual(self.spider.detailContent(["9"]), {"list": []})
+
+    def test_player_content_returns_direct_url_for_http_play_id(self):
+        result = self.spider.playerContent("量子", "https://cdn.example/test.m3u8", {})
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["jx"], 0)
+        self.assertEqual(result["url"], "https://cdn.example/test.m3u8")
+        self.assertEqual(result["header"]["Referer"], "https://40000.me/")
+
+    def test_player_content_marks_non_http_play_id_for_parse(self):
+        result = self.spider.playerContent("量子", "play-2", {})
+        self.assertEqual(result["parse"], 1)
+        self.assertEqual(result["jx"], 1)
+        self.assertEqual(result["url"], "play-2")
+
+    def test_player_content_returns_empty_parse_payload_for_blank_id(self):
+        self.assertEqual(
+            self.spider.playerContent("量子", "", {}),
+            {
+                "parse": 1,
+                "jx": 1,
+                "url": "",
+                "header": {
+                    "User-Agent": self.spider.headers["User-Agent"],
+                    "Referer": "https://40000.me/",
+                },
+            },
+        )

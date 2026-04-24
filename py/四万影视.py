@@ -281,3 +281,15 @@ class Spider(BaseSpider):
                 }
             ]
         }
+
+    def playerContent(self, flag, id, vipFlags):
+        play_id = str(id or "").strip()
+        header = {
+            "User-Agent": self.headers["User-Agent"],
+            "Referer": self.host + "/",
+        }
+        if not play_id:
+            return {"parse": 1, "jx": 1, "url": "", "header": header}
+        if play_id.startswith("http://") or play_id.startswith("https://"):
+            return {"parse": 0, "jx": 0, "url": play_id, "header": header}
+        return {"parse": 1, "jx": 1, "url": play_id, "header": header}
