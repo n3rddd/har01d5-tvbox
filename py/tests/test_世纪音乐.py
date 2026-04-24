@@ -74,6 +74,54 @@ SEARCH_HTML = """
 </body></html>
 """
 
+RANK_HTML = """
+<html><body>
+  <ul class="play_list">
+    <li><div class="name"><a href="/mp3/321.html">搁浅</a></div></li>
+    <li><div class="name"><a href="/mp3/322.html">简单爱</a></div></li>
+  </ul>
+</body></html>
+"""
+
+SONG_HTML = """
+<html><head><title>夜曲_世纪音乐</title></head><body>
+  <h1>夜曲</h1>
+  <div class="play_singer"><div class="name"><a>周杰伦</a></div></div>
+  <div class="playhimg"><img src="/img/song_detail.jpg"></div>
+</body></html>
+"""
+
+MV_DETAIL_HTML = """
+<html><head><title>晴天MV_世纪音乐</title></head><body>
+  <h1>晴天MV</h1>
+  <div class="play_singer"><div class="name"><a>周杰伦</a></div></div>
+  <div class="playhimg"><img src="/img/mv_detail.jpg"></div>
+</body></html>
+"""
+
+PLAYLIST_DETAIL_HTML = """
+<html><body>
+  <h1>周董歌单</h1>
+  <div class="pic"><img src="/img/playlist.jpg"></div>
+  <ul class="play_list">
+    <li><div class="name"><a href="/mp3/401.html">安静</a></div></li>
+    <li><div class="name"><a href="/mp3/402.html">晴天</a></div></li>
+  </ul>
+</body></html>
+"""
+
+SINGER_DETAIL_HTML = """
+<html><body>
+  <h1>周杰伦</h1>
+  <div class="singer_info"><div class="info"><p>华语男歌手</p></div></div>
+  <div class="pic"><img src="/img/singer_detail.jpg"></div>
+  <ul class="play_list">
+    <li><div class="name"><a href="/mp3/501.html">青花瓷</a></div></li>
+    <li><div class="name"><a href="/mp3/502.html">稻香</a></div></li>
+  </ul>
+</body></html>
+"""
+
 
 class TestSJMusicSpider(unittest.TestCase):
     def setUp(self):
@@ -144,6 +192,26 @@ class TestSJMusicSpider(unittest.TestCase):
             self.spider.categoryContent("unknown", "1", False, {}),
             {"page": 1, "limit": 0, "total": 0, "list": []},
         )
+
+    @patch.object(Spider, "fetch")
+    def test_detail_content_builds_rank_song_mv_playlist_and_singer(self, mock_fetch):
+        mock_fetch.side_effect = [
+            SimpleNamespace(status_code=200, text=RANK_HTML),
+            SimpleNamespace(status_code=200, text=SONG_HTML),
+            SimpleNamespace(status_code=200, text=MV_DETAIL_HTML),
+            SimpleNamespace(status_code=200, text=PLAYLIST_DETAIL_HTML),
+            SimpleNamespace(status_code=200, text=SINGER_DETAIL_HTML),
+        ]
+        rank_vod = self.spider.detailContent(["rank:rise"])["list"][0]
+        song_vod = self.spider.detailContent(["song:123"])["list"][0]
+        mv_vod = self.spider.detailContent(["mv:456"])["list"][0]
+        playlist_vod = self.spider.detailContent(["playlist:top100"])["list"][0]
+        singer_vod = self.spider.detailContent(["singer:jay"])["list"][0]
+        self.assertEqual(rank_vod["vod_play_url"], "搁浅$music:321#简单爱$music:322")
+        self.assertEqual(song_vod["vod_play_url"], "周杰伦 - 夜曲$music:123")
+        self.assertEqual(mv_vod["vod_play_url"], "晴天MV$vplay:456:1080")
+        self.assertEqual(playlist_vod["vod_play_url"], "安静$music:401#晴天$music:402")
+        self.assertEqual(singer_vod["vod_play_url"], "青花瓷$music:501#稻香$music:502")
 
 
 if __name__ == "__main__":

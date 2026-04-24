@@ -101,6 +101,30 @@ class Spider(BaseSpider):
         page = int(pg)
         return {"page": page, "limit": len(items), "total": len(items), "list": items}
 
+    def _decode_vod_id(self, vod_id):
+        raw = str(vod_id or "").strip()
+        if ":" not in raw:
+            return "", ""
+        prefix, value = raw.split(":", 1)
+        if prefix == "rank":
+            return prefix, f"/list/{value}.html"
+        if prefix == "song":
+            return prefix, f"/mp3/{value}.html"
+        if prefix == "mv":
+            return prefix, f"/mp4/{value}.html"
+        if prefix == "playlist":
+            return prefix, f"/playlist/{value}.html"
+        if prefix == "singer":
+            return prefix, f"/singer/{value}.html"
+        return "", ""
+
+    def _encode_play_id(self, kind, value):
+        if kind == "music":
+            return f"music:{value}"
+        if kind == "vplay":
+            return f"vplay:{value}:1080"
+        return ""
+
     def _parse_list_cards(self, html, expected_prefixes):
         root = self._load_html(html)
         items = []
@@ -125,6 +149,21 @@ class Spider(BaseSpider):
                 }
             )
         return items
+
+    def _build_episode_rows(self, html):
+        root = self._load_html(html)
+        rows = []
+        for node in root.xpath("//*[contains(@class,'play_list')]//li"):
+            href = "".join(node.xpath(".//a[1]/@href")).strip()
+            song_id = self._extract_site_id(href, "mp3")
+            if not song_id:
+                continue
+            rows.append(
+                self._clean_text("".join(node.xpath(".//a[1]//text()")))
+                + "$"
+                + self._encode_play_id("music", song_id)
+            )
+        return rows
 
     def homeContent(self, filter):
         items = self._parse_home_items(self._fetch_html("/"))
@@ -175,3 +214,74 @@ class Spider(BaseSpider):
             ["song:", "mv:", "playlist:", "singer:"],
         )
         return self._page_result(items, pg)
+
+    def detailContent(self, ids):
+        vod_id = str((ids or [""])[0] or "").strip()
+        kind, path = self._decode_vod_id(vod_id)
+        if not path:
+            return {"list": []}
+        html = self._fetch_html(path)
+        root = self._load_html(html)
+        title = self._clean_text("".join(root.xpath("//h1[1]//text()")))
+        pic = self._build_url("".join(root.xpath("(//img[1]/@src)[1]")))
+        if kind == "rank":
+            return {
+                "list": [
+                    {
+                        "vod_id": vod_id,
+                        "vod_name": title or "排行榜",
+                        "vod_pic": pic,
+                        "vod_remarks": "",
+                        "vod_content": "",
+                        "vod_play_from": self.name,
+                        "vod_play_url": "#".join(self._build_episode_rows(html)),
+                    }
+                ]
+            }
+        if kind == "song":
+            singer = self._clean_text("".join(root.xpath("//*[contains(@class,'play_singer')]//a[1]//text()")))
+            display = f"{singer} - {title}" if singer else title
+            return {
+                "list": [
+                    {
+                        "vod_id": vod_id,
+                        "vod_name": title,
+                        "vod_pic": pic,
+                        "vod_remarks": "",
+                        "vod_content": "",
+                        "vod_actor": singer,
+                        "vod_play_from": self.name,
+                        "vod_play_url": display + "$" + self._encode_play_id("music", vod_id.split(":", 1)[1]),
+                    }
+                ]
+            }
+        if kind == "mv":
+            return {
+                "list": [
+                    {
+                        "vod_id": vod_id,
+                        "vod_name": title,
+                        "vod_pic": pic,
+                        "vod_remarks": "",
+                        "vod_content": "",
+                        "vod_play_from": self.name,
+                        "vod_play_url": title + "$" + self._encode_play_id("vplay", vod_id.split(":", 1)[1]),
+                    }
+                ]
+            }
+        if kind in ("playlist", "singer"):
+            content = self._clean_text("".join(root.xpath("//*[contains(@class,'info')]//p[1]//text()")))
+            return {
+                "list": [
+                    {
+                        "vod_id": vod_id,
+                        "vod_name": title,
+                        "vod_pic": pic,
+                        "vod_remarks": "",
+                        "vod_content": content,
+                        "vod_play_from": self.name,
+                        "vod_play_url": "#".join(self._build_episode_rows(html)),
+                    }
+                ]
+            }
+        return {"list": []}
