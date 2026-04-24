@@ -52,6 +52,15 @@ class Spider(BaseSpider):
         matched = re.search(r"(/vod/detail/[^?#]+\.html)", raw)
         return matched.group(1).lstrip("/") if matched else raw.lstrip("/")
 
+    def _decode_vod_id(self, vod_id):
+        raw = str(vod_id or "").strip().lstrip("/")
+        return self._abs_url(raw)
+
+    def _encode_play_id(self, href):
+        raw = str(href or "").strip()
+        matched = re.search(r"(/vod/play/[^?#]+\.html)", raw)
+        return matched.group(1).lstrip("/") if matched else raw.lstrip("/")
+
     def _clean_text(self, text):
         return re.sub(r"\s+", " ", str(text or "")).strip()
 
@@ -112,3 +121,66 @@ class Spider(BaseSpider):
         url = f"{self.host}/vod/search/page/{page}/wd/{quote(keyword)}.html"
         items = self._parse_cards(self._get_html(url))
         return {"page": page, "total": len(items), "list": items[:10] if quick else items}
+
+    def _parse_play_groups(self, root):
+        groups = []
+        tabs = root.xpath("//*[contains(@class,'module-tab-item') and contains(@class,'tab-item')]")
+        for index, tab in enumerate(tabs):
+            name = self._clean_text("".join(tab.xpath(".//text()")))
+            target = self._clean_text((tab.xpath("./@href") or [""])[0])
+            if not name:
+                continue
+            playlist = []
+            if target.startswith("#"):
+                playlist = root.xpath(f"//*[@id='{target[1:]}']")
+            if not playlist:
+                playlist = root.xpath(f"(//*[contains(@class,'module-player-list')])[{index + 1}]")
+            if not playlist:
+                continue
+            episodes = []
+            for anchor in playlist[0].xpath(".//a[@href]"):
+                ep_name = self._clean_text("".join(anchor.xpath(".//text()")))
+                ep_id = self._encode_play_id((anchor.xpath("./@href") or [""])[0])
+                if ep_name and ep_id:
+                    episodes.append(f"{ep_name}${ep_id}")
+            if episodes:
+                groups.append((name, "#".join(episodes)))
+        if groups:
+            return groups
+
+        fallback = []
+        for anchor in root.xpath("//*[contains(@class,'module-player-list')]//a[@href]"):
+            ep_name = self._clean_text("".join(anchor.xpath(".//text()")))
+            ep_id = self._encode_play_id((anchor.xpath("./@href") or [""])[0])
+            if ep_name and ep_id:
+                fallback.append(f"{ep_name}${ep_id}")
+        if fallback:
+            return [("播放列表", "#".join(fallback))]
+        return []
+
+    def detailContent(self, ids):
+        raw_id = ids[0] if isinstance(ids, list) else ids
+        html = self._get_html(self._decode_vod_id(raw_id))
+        root = self.html(html)
+        if root is None:
+            return {"list": []}
+        groups = self._parse_play_groups(root)
+        remarks = [
+            self._clean_text("".join(node.xpath(".//text()")))
+            for node in root.xpath("//*[contains(@class,'video-info-items')]")
+        ]
+        pic = (
+            root.xpath("//*[contains(@class,'module-item-pic')]//img[1]/@data-src")
+            or root.xpath("//*[contains(@class,'module-item-pic')]//img[1]/@src")
+            or [""]
+        )[0]
+        vod = {
+            "vod_id": str(raw_id),
+            "vod_name": self._clean_text("".join(root.xpath("//*[contains(@class,'page-title')][1]//text()"))),
+            "vod_pic": self._abs_url(pic),
+            "vod_content": self._clean_text("".join(root.xpath("//*[contains(@class,'video-info-content')][1]//text()"))),
+            "vod_remarks": " / ".join([value for value in remarks if value]),
+            "vod_play_from": "$$$".join(name for name, _ in groups),
+            "vod_play_url": "$$$".join(urls for _, urls in groups),
+        }
+        return {"list": [vod]}

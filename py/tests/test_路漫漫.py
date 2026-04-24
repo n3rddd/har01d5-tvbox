@@ -26,6 +26,25 @@ SAMPLE_LIST_HTML = """
 </body></html>
 """
 
+SAMPLE_DETAIL_HTML = """
+<html><body>
+<h1 class="page-title">进击的巨人</h1>
+<div class="module-item-pic"><img class="lazyload" src="/upload/jjdr.jpg" /></div>
+<div class="video-info-items">状态：已完结</div>
+<div class="video-info-items">地区：日本</div>
+<div class="video-info-content">人类与巨人的战斗。</div>
+<a class="module-tab-item tab-item" href="#line1">在线播放</a>
+<a class="module-tab-item tab-item" href="#line2">云播</a>
+<div id="line1" class="module-player-list">
+  <a href="/vod/play/1001-1-1.html">第1集</a>
+  <a href="/vod/play/1001-1-2.html">第2集</a>
+</div>
+<div id="line2" class="module-player-list">
+  <a href="/vod/play/1001-2-1.html">HD</a>
+</div>
+</body></html>
+"""
+
 
 class TestLuManManSpider(unittest.TestCase):
     def setUp(self):
@@ -71,6 +90,34 @@ class TestLuManManSpider(unittest.TestCase):
         self.assertEqual(result["page"], 3)
         self.assertEqual(result["list"][0]["vod_name"], "海贼王")
         mock_html.assert_called_with("https://www.lmm85.com/vod/search/page/3/wd/%E6%B5%B7%E8%B4%BC.html")
+
+    @patch.object(Spider, "_get_html")
+    def test_detail_content_parses_meta_and_playlists(self, mock_html):
+        mock_html.return_value = SAMPLE_DETAIL_HTML
+        result = self.spider.detailContent(["vod/detail/1001.html"])
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_name"], "进击的巨人")
+        self.assertEqual(vod["vod_pic"], "https://www.lmm85.com/upload/jjdr.jpg")
+        self.assertEqual(vod["vod_content"], "人类与巨人的战斗。")
+        self.assertEqual(vod["vod_remarks"], "状态：已完结 / 地区：日本")
+        self.assertEqual(vod["vod_play_from"], "在线播放$$$云播")
+        self.assertIn("第1集$vod/play/1001-1-1.html#第2集$vod/play/1001-1-2.html", vod["vod_play_url"])
+        self.assertIn("HD$vod/play/1001-2-1.html", vod["vod_play_url"])
+
+    @patch.object(Spider, "_get_html")
+    def test_detail_content_falls_back_to_direct_playlist_scan(self, mock_html):
+        mock_html.return_value = """
+        <html><body>
+        <h1 class="page-title">测试</h1>
+        <div class="module-player-list">
+          <a href="/vod/play/1-1-1.html">正片</a>
+        </div>
+        </body></html>
+        """
+        result = self.spider.detailContent(["vod/detail/1.html"])
+        vod = result["list"][0]
+        self.assertEqual(vod["vod_play_from"], "播放列表")
+        self.assertEqual(vod["vod_play_url"], "正片$vod/play/1-1-1.html")
 
 
 if __name__ == "__main__":
