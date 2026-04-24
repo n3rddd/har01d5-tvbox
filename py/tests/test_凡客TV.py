@@ -1,6 +1,7 @@
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,58 @@ class TestFKTVSpider(unittest.TestCase):
         self.assertEqual(payload["line_id"], "line-a")
         self.assertEqual(payload["episode_name"], "第1集")
         self.assertEqual(payload["page"], "https://fktv.me/movie/detail/9001")
+
+    @patch.object(Spider, "_request_html")
+    def test_category_content_builds_url_and_parses_cards(self, mock_request_html):
+        mock_request_html.return_value = """
+        <div class="card-wrap">
+          <div class="meta-wrap">
+            <a class="normal-title" href="/movie/detail/abc123" title="示例电影">示例电影</a>
+            <img class="lazy-load" data-src="/poster.jpg" />
+            <span class="tag">电影</span>
+            <span class="tag">更新中</span>
+          </div>
+        </div>
+        """
+        result = self.spider.categoryContent("1", "2", False, {})
+        self.assertEqual(
+            mock_request_html.call_args.args[0],
+            "https://fktv.me/channel?page=2&cat_id=1&page_size=32&order=new",
+        )
+        self.assertEqual(
+            result["list"],
+            [
+                {
+                    "vod_id": "abc123",
+                    "vod_name": "示例电影",
+                    "vod_pic": "https://fktv.me/poster.jpg",
+                    "vod_remarks": "电影 | 更新中",
+                    "type_name": "电影",
+                }
+            ],
+        )
+        self.assertNotIn("pagecount", result)
+
+    @patch.object(Spider, "_request_html")
+    def test_search_content_builds_url_and_handles_blank_keyword(self, mock_request_html):
+        blank = self.spider.searchContent("", False, "1")
+        self.assertEqual(blank, {"page": 1, "limit": 0, "total": 0, "list": []})
+        mock_request_html.assert_not_called()
+
+        mock_request_html.return_value = """
+        <div class="hover-wrap">
+          <a class="hover-title" href="/movie/detail/xyz789" title="搜索影片">搜索影片</a>
+          <img class="lazy-load" data-src="https://img.example/search.jpg" />
+          <span class="tag">剧集</span>
+        </div>
+        """
+        result = self.spider.searchContent("繁花", False, "3")
+        self.assertEqual(
+            mock_request_html.call_args.args[0],
+            "https://fktv.me/search?keyword=%E7%B9%81%E8%8A%B1",
+        )
+        self.assertEqual(result["page"], 3)
+        self.assertEqual(result["list"][0]["vod_id"], "xyz789")
 
 
 if __name__ == "__main__":
