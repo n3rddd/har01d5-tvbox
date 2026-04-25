@@ -112,14 +112,8 @@
 ```text
 // ignore
 //@name:[直] omofun
-//@webSite:http://101.42.227.94:11024
 //@version:1
 //@remark:
-//@codeID:z5nxgZSWE8ipZYvGtImsRFu73TOB45fZ
-//@env:
-//@isAV:0
-//@deprecated:0
-//@order:B
 //@format:secspider/1
 //@alg:aes-256-gcm
 //@wrap:hkdf-aes-keywrap
@@ -137,14 +131,8 @@ payload.base64:...
 
 - 业务元数据
   - `name`
-  - `webSite`
   - `version`
   - `remark`
-  - `codeID`
-  - `env`
-  - `isAV`
-  - `deprecated`
-  - `order`
 - 协议元数据
   - `format`
   - `alg`
@@ -161,6 +149,7 @@ payload.base64:...
 
 字段约束如下：
 
+- `name`、`version`、`remark` 是仅保留的业务元数据字段
 - `format` 固定为 `secspider/1`
 - `alg` 首版固定为 `aes-256-gcm`
 - `wrap` 首版固定为 `hkdf-aes-keywrap`
@@ -189,7 +178,7 @@ payload.base64:...
 选择原因如下：
 
 - `AES-256-GCM` 为成熟 AEAD 算法，适合同时提供保密性和密文完整性
-- `HKDF-SHA256` 足够简单，适合从宿主主密钥按 `kid/codeID/version` 派生包密钥
+- `HKDF-SHA256` 足够简单，适合从宿主主密钥按 `kid/name/version` 派生包密钥
 - `Ed25519` 适合快速、稳定地完成离线签名和验签
 
 本次设计明确不采用：
@@ -253,7 +242,7 @@ payload.base64:...
 wrap_key = HKDF-SHA256(
   ikm = master_secret,
   salt = kid,
-  info = "secspider:" + codeID + ":" + version
+  info = "secspider:" + name + ":" + version
 )
 ```
 
@@ -263,7 +252,7 @@ wrap_key = HKDF-SHA256(
 
 收益：
 
-- 同一 `master_secret` 下，不同 `codeID/version` 的包不会直接共钥
+- 同一 `master_secret` 下，不同 `name/version` 的包不会直接共钥
 - 支持按 `kid` 做宿主侧密钥轮换
 
 ## 密钥轮换策略
@@ -363,7 +352,7 @@ wrap_key = HKDF-SHA256(
 3. 检查 `format == secspider/1`
 4. 按 `kid` 获取签名公钥
 5. 对头字段和 payload 执行 `Ed25519` 验签
-6. 验签通过后，按 `kid/codeID/version` 派生 `wrap_key`
+6. 验签通过后，按 `kid/name/version` 派生 `wrap_key`
 7. 解开 `ek` 得到 `content_key`
 8. 使用 `content_key + nonce` 解密 `payload`
 9. 对解密后的源码做 `sha256` 校验，必须与 `hash` 一致
@@ -432,7 +421,7 @@ class SecSpiderRuntime:
 4. 生成随机 `nonce`
 5. 可选压缩源码
 6. 使用 `AES-256-GCM` 加密源码
-7. 基于 `master_secret + kid + codeID + version` 派生 `wrap_key`
+7. 基于 `master_secret + kid + name + version` 派生 `wrap_key`
 8. 用 `wrap_key` 包裹 `content_key`
 9. 生成规范化包头
 10. 对头部和 payload 做 `Ed25519` 签名
