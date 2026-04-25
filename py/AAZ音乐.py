@@ -139,6 +139,61 @@ class Spider(BaseSpider):
             )
         return items
 
+    def _decode_vod_id(self, vod_id):
+        raw = str(vod_id or "").strip()
+        if ":" not in raw:
+            return "", ""
+        prefix, value = raw.split(":", 1)
+        if prefix == "song":
+            return prefix, "/m/%s.html" % value
+        if prefix == "singer":
+            return prefix, "/s/%s" % value
+        if prefix == "playlist":
+            return prefix, "/p/%s" % value
+        if prefix == "album":
+            return prefix, "/a/%s" % value
+        if prefix == "mv":
+            return prefix, "/v/%s" % value
+        return "", ""
+
+    def _parse_song_detail(self, html, song_id):
+        title_match = re.search(
+            r'<div class="djname"><h1>(.*?)<a href="javascript:location\.reload\(\)"',
+            str(html or ""),
+            re.S,
+        )
+        title = self._clean_text(re.sub(r"<[^>]+>", " ", title_match.group(1))) if title_match else song_id
+        singer_match = re.search(r'<div class="name"><a href="/s/[^"]+"[^>]*>([^<]+)</a></div>', str(html or ""))
+        album_match = re.search(r'所属专辑：<a href="/a/[^"]+"[^>]*>([^<]+)</a>', str(html or ""))
+        cover_match = re.search(r'<img class="rotate" id="mcover" src="([^"]+)"', str(html or ""))
+        duration_match = re.search(r"歌曲时长：([^<]+)</div>", str(html or ""))
+        content_match = re.search(r'<meta name="description" content="([^"]+)"', str(html or ""))
+        return {
+            "song_name": title,
+            "singer": self._clean_text(singer_match.group(1)) if singer_match else "",
+            "album": self._clean_text(album_match.group(1)) if album_match else "",
+            "cover": self._build_url(cover_match.group(1)) if cover_match else "",
+            "duration": self._clean_text(duration_match.group(1)) if duration_match else "",
+            "content": self._clean_text(content_match.group(1)) if content_match else "",
+        }
+
+    def _parse_folder_tracks(self, html):
+        root = self._load_html(html)
+        rows = []
+        seen = set()
+        for node in root.xpath("//li"):
+            href = "".join(node.xpath(".//div[contains(@class,'name')]//a[1]/@href")).strip()
+            song_id = self._extract_song_id(href)
+            if not song_id or song_id in seen:
+                continue
+            seen.add(song_id)
+            rows.append(
+                self._clean_text("".join(node.xpath(".//div[contains(@class,'name')]//a[1]/@title")))
+                + "$song:"
+                + song_id
+            )
+        return rows
+
     def homeContent(self, filter):
         items = self._parse_song_cards(self._fetch_html(self.category_paths["new"]))
         return {"class": list(self.classes), "list": items}
@@ -169,3 +224,41 @@ class Spider(BaseSpider):
         html = self._fetch_html("/so/%s.html" % quote(keyword))
         items = self._parse_search_cards(html)
         return {"page": int(pg), "limit": len(items), "total": len(items), "list": items}
+
+    def detailContent(self, array):
+        vod_id = str((array or [""])[0] or "").strip()
+        kind, path = self._decode_vod_id(vod_id)
+        if not kind:
+            return {"list": []}
+        html = self._fetch_html(path)
+        if kind == "song":
+            info = self._parse_song_detail(html, vod_id.split(":", 1)[1])
+            remarks = " | ".join([item for item in [info["singer"], info["album"], info["duration"]] if item])
+            return {
+                "list": [
+                    {
+                        "vod_id": vod_id,
+                        "vod_name": info["song_name"],
+                        "vod_pic": info["cover"],
+                        "vod_remarks": remarks,
+                        "vod_content": info["content"],
+                        "vod_play_from": "AAZ音乐",
+                        "vod_play_url": "播放$" + vod_id,
+                    }
+                ]
+            }
+        root = self._load_html(html)
+        tracks = self._parse_folder_tracks(html)
+        return {
+            "list": [
+                {
+                    "vod_id": vod_id,
+                    "vod_name": self._clean_text("".join(root.xpath("//div[contains(@class,'title')]//h1[1]//text()"))),
+                    "vod_pic": self._build_url("".join(root.xpath("//div[contains(@class,'pic')]//img[1]/@src"))),
+                    "vod_remarks": "",
+                    "vod_content": self._clean_text("".join(root.xpath("//div[contains(@class,'info')][1]//text()"))),
+                    "vod_play_from": "AAZ音乐",
+                    "vod_play_url": "#".join(tracks),
+                }
+            ]
+        }

@@ -72,6 +72,31 @@ SEARCH_HTML = """
 </body></html>
 """
 
+SONG_DETAIL_HTML = """
+<html>
+  <head><meta name="description" content="夜曲歌曲简介"></head>
+  <body>
+    <div class="djname"><h1>夜曲<a href="javascript:location.reload()">刷新</a></h1></div>
+    <div class="name"><a href="/s/jay">周杰伦</a></div>
+    所属专辑：<a href="/a/fantasy">范特西</a>
+    <img class="rotate" id="mcover" src="/img/song_detail.jpg">
+    <div>歌曲时长：03:45</div>
+  </body>
+</html>
+"""
+
+FOLDER_DETAIL_HTML = """
+<html><body>
+  <div class="title"><h1>周董精选</h1></div>
+  <div class="pic"><img src="/img/folder_detail.jpg"></div>
+  <div class="info">经典歌曲合集</div>
+  <ul>
+    <li><div class="name"><a href="/m/3001.html" title="安静">安静</a></div></li>
+    <li><div class="name"><a href="/m/3002.html" title="晴天">晴天</a></div></li>
+  </ul>
+</body></html>
+"""
+
 
 class TestAAZMusicSpider(unittest.TestCase):
     def setUp(self):
@@ -134,6 +159,37 @@ class TestAAZMusicSpider(unittest.TestCase):
             self.spider.searchContent("", False, "1"),
             {"page": 1, "limit": 0, "total": 0, "list": []},
         )
+
+    @patch.object(Spider, "fetch")
+    def test_detail_content_builds_song_metadata_and_single_play_url(self, mock_fetch):
+        mock_fetch.return_value = SimpleNamespace(status_code=200, text=SONG_DETAIL_HTML)
+        vod = self.spider.detailContent(["song:2001"])["list"][0]
+        self.assertEqual(vod["vod_name"], "夜曲")
+        self.assertEqual(vod["vod_pic"], "https://www.aaz.cx/img/song_detail.jpg")
+        self.assertEqual(vod["vod_remarks"], "周杰伦 | 范特西 | 03:45")
+        self.assertEqual(vod["vod_play_from"], "AAZ音乐")
+        self.assertEqual(vod["vod_play_url"], "播放$song:2001")
+
+    @patch.object(Spider, "fetch")
+    def test_detail_content_builds_folder_track_list_for_singer_playlist_album_and_mv(self, mock_fetch):
+        mock_fetch.side_effect = [
+            SimpleNamespace(status_code=200, text=FOLDER_DETAIL_HTML),
+            SimpleNamespace(status_code=200, text=FOLDER_DETAIL_HTML),
+            SimpleNamespace(status_code=200, text=FOLDER_DETAIL_HTML),
+            SimpleNamespace(status_code=200, text=FOLDER_DETAIL_HTML),
+        ]
+        singer_vod = self.spider.detailContent(["singer:jay"])["list"][0]
+        playlist_vod = self.spider.detailContent(["playlist:jaybest"])["list"][0]
+        album_vod = self.spider.detailContent(["album:fantasy"])["list"][0]
+        mv_vod = self.spider.detailContent(["mv:nocturnemv"])["list"][0]
+        expected = "安静$song:3001#晴天$song:3002"
+        self.assertEqual(singer_vod["vod_play_url"], expected)
+        self.assertEqual(playlist_vod["vod_play_url"], expected)
+        self.assertEqual(album_vod["vod_play_url"], expected)
+        self.assertEqual(mv_vod["vod_play_url"], expected)
+
+    def test_detail_content_returns_empty_list_for_invalid_vod_id(self):
+        self.assertEqual(self.spider.detailContent(["bad"])["list"], [])
 
 
 if __name__ == "__main__":
