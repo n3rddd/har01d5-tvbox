@@ -1,4 +1,5 @@
 # coding=utf-8
+import json
 import re
 import sys
 from urllib.parse import quote, urljoin
@@ -194,6 +195,27 @@ class Spider(BaseSpider):
             )
         return rows
 
+    def _post_play_api(self, song_id):
+        body = "id=%s&type=music" % quote(str(song_id or ""))
+        response = self.fetch(
+            self._build_url("/js/play.php"),
+            headers={
+                "User-Agent": self.headers["User-Agent"],
+                "Referer": self._build_url("/m/%s.html" % song_id),
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            data=body,
+            timeout=10,
+            verify=False,
+        )
+        if getattr(response, "status_code", 0) != 200:
+            return {}
+        try:
+            return json.loads(getattr(response, "text", "") or "{}")
+        except Exception:
+            return {}
+
     def homeContent(self, filter):
         items = self._parse_song_cards(self._fetch_html(self.category_paths["new"]))
         return {"class": list(self.classes), "list": items}
@@ -261,4 +283,16 @@ class Spider(BaseSpider):
                     "vod_play_url": "#".join(tracks),
                 }
             ]
+        }
+
+    def playerContent(self, flag, id, vipFlags):
+        raw = str(id or "").strip()
+        if not raw.startswith("song:"):
+            return {"parse": 0, "url": "", "header": dict(self.headers)}
+        song_id = raw.split(":", 1)[1]
+        payload = self._post_play_api(song_id)
+        return {
+            "parse": 0,
+            "url": self._clean_text(payload.get("url")),
+            "header": dict(self.headers),
         }
