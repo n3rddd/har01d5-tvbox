@@ -1,7 +1,9 @@
 # coding=utf-8
+import base64
+import json
 import re
 import sys
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin
 
 from base.spider import Spider as BaseSpider
 
@@ -134,6 +136,21 @@ class Spider(BaseSpider):
     def _join_group_urls(self, groups):
         return "$$$".join("#".join(group) for group in groups if group)
 
+    def _base64decode(self, value):
+        try:
+            return base64.b64decode(str(value or "")).decode("utf-8")
+        except Exception:
+            return ""
+
+    def _extract_player_data(self, html):
+        matched = re.search(r"player_aaaa\s*=\s*(\{[\s\S]*?\})", str(html or ""))
+        if not matched:
+            return {}
+        try:
+            return json.loads(matched.group(1))
+        except Exception:
+            return {}
+
     def categoryContent(self, tid, pg, filter, extend):
         page = max(1, int(pg))
         url = self.host + f"/vodshow/{tid}--------{page}---.html"
@@ -213,3 +230,26 @@ class Spider(BaseSpider):
             "vod_play_url": self._join_group_urls(play_urls),
         }
         return {"list": [vod]}
+
+    def playerContent(self, flag, id, vipFlags):
+        raw_id = str(id or "")
+        if raw_id.startswith(("http://", "https://")) and any(
+            raw_id.lower().split("?")[0].endswith(ext) for ext in [".m3u8", ".mp4", ".flv"]
+        ):
+            return {"parse": 0, "jx": 0, "url": raw_id}
+
+        target = self.host + raw_id
+        data = self._extract_player_data(self._request_html(target))
+        raw_url = str(data.get("url") or "")
+        encrypt = str(data.get("encrypt") or "")
+        media_url = ""
+        if encrypt == "1":
+            media_url = unquote(raw_url)
+        elif encrypt == "2":
+            media_url = unquote(self._base64decode(raw_url))
+        elif raw_url:
+            media_url = raw_url
+
+        if media_url.startswith("http"):
+            return {"parse": 0, "jx": 0, "url": media_url}
+        return {"parse": 1, "jx": 1, "url": target}

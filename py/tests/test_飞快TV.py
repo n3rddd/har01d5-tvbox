@@ -116,3 +116,30 @@ class TestFeikuaiSpider(unittest.TestCase):
             vod["vod_play_url"],
             "第1集$/vodplay/1-1-1.html#第2集$/vodplay/1-1-2.html$$$第1集$/vodplay/1-2-1.html$$$夸克资源$https://pan.quark.cn/s/demo1$$$百度合集$https://pan.baidu.com/s/demo2",
         )
+
+    def test_base64decode_decodes_fixture(self):
+        self.assertEqual(
+            self.spider._base64decode("aHR0cHM6Ly9jZG4uZXhhbXBsZS5jb20vdjIubTN1OA=="),
+            "https://cdn.example.com/v2.m3u8",
+        )
+
+    @patch.object(Spider, "_request_html")
+    def test_player_content_supports_encrypt_1_and_encrypt_2(self, mock_request_html):
+        mock_request_html.side_effect = [
+            '<script>player_aaaa={"url":"https%3A//cdn.example.com/v1.m3u8","encrypt":"1"}</script>',
+            '<script>player_aaaa={"url":"aHR0cHM6Ly9jZG4uZXhhbXBsZS5jb20vdjIubTN1OA==","encrypt":"2"}</script>',
+        ]
+        direct = self.spider.playerContent("feikuai", "/vodplay/1-1-1.html", {})
+        encoded = self.spider.playerContent("feikuai", "/vodplay/1-1-2.html", {})
+        self.assertEqual(direct["parse"], 0)
+        self.assertEqual(direct["url"], "https://cdn.example.com/v1.m3u8")
+        self.assertEqual(encoded["parse"], 0)
+        self.assertEqual(encoded["url"], "https://cdn.example.com/v2.m3u8")
+
+    @patch.object(Spider, "_request_html")
+    def test_player_content_falls_back_when_script_missing(self, mock_request_html):
+        mock_request_html.return_value = "<html><body>empty</body></html>"
+        result = self.spider.playerContent("feikuai", "/vodplay/1-1-3.html", {})
+        self.assertEqual(result["parse"], 1)
+        self.assertEqual(result["jx"], 1)
+        self.assertEqual(result["url"], "https://feikuai.tv/vodplay/1-1-3.html")
