@@ -137,6 +137,23 @@ class TestFeikuaiSpider(unittest.TestCase):
         self.assertEqual(encoded["url"], "https://cdn.example.com/v2.m3u8")
 
     @patch.object(Spider, "_request_html")
+    def test_player_content_handles_live_nested_player_payload(self, mock_request_html):
+        mock_request_html.return_value = """
+        <script type="text/javascript">
+        var player_aaaa={"flag":"play","encrypt":2,"trysee":0,"points":0,
+        "link_current":"\\/vodplay\\/236443-1-1.html","link":"\\/vodplay\\/236443-{sid}-{nid}.html",
+        "link_next":"","link_pre":"",
+        "vod_data":{"vod_name":"\\u6076\\u5973\\u5b66\\u9662","vod_actor":"","vod_director":"Jamie Grefe","vod_class":"\\u5267\\u60c5"},
+        "url":"JTY4JTc0JTc0JTcwJTczJTNBJTJGJTJGJTYzJTY0JTZFJTJFJTc5JTdBJTdBJTc5JTc2JTY5JTcwJTJEJTMyJTM5JTJFJTYzJTZGJTZEJTJGJTMyJTMwJTMyJTM2JTMwJTM0JTMyJTM1JTJGJTMyJTMzJTMyJTM5JTMxJTVGJTM0JTM1JTM5JTM2JTM3JTYzJTM3JTMzJTJGJTY5JTZFJTY0JTY1JTc4JTJFJTZEJTMzJTc1JTM4",
+        "from":"1080zyk","server":"no","note":"","id":"236443","sid":1,"nid":1}
+        </script>
+        """
+        result = self.spider.playerContent("feikuai", "/vodplay/236443-1-1.html", {})
+        self.assertEqual(result["parse"], 0)
+        self.assertEqual(result["jx"], 0)
+        self.assertEqual(result["url"], "https://cdn.yzzyvip-29.com/20260425/23291_45967c73/index.m3u8")
+
+    @patch.object(Spider, "_request_html")
     def test_player_content_falls_back_when_script_missing(self, mock_request_html):
         mock_request_html.return_value = "<html><body>empty</body></html>"
         result = self.spider.playerContent("feikuai", "/vodplay/1-1-3.html", {})

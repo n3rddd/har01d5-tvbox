@@ -143,11 +143,40 @@ class Spider(BaseSpider):
             return ""
 
     def _extract_player_data(self, html):
-        matched = re.search(r"player_aaaa\s*=\s*(\{[\s\S]*?\})", str(html or ""))
+        body = str(html or "")
+        matched = re.search(r"player_aaaa\s*=\s*\{", body)
         if not matched:
             return {}
+        start = matched.end() - 1
+        depth = 0
+        in_string = False
+        escape = False
+        end = -1
+        for index in range(start, len(body)):
+            char = body[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                continue
+            if char == "{":
+                depth += 1
+                continue
+            if char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    break
+        if end < 0:
+            return {}
         try:
-            return json.loads(matched.group(1))
+            return json.loads(body[start:end])
         except Exception:
             return {}
 
